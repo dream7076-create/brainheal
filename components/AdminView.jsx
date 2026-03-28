@@ -123,9 +123,12 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   const [hoveredDelId, setHoveredDelId] = useState(null);
   const [eqList, setEqList] = useState(EQUIPMENT_LIST);
   const [eqLoading, setEqLoading] = useState(false);
-  const [userList, setUserList] = useState([]); // auth 유저 목록
-  const [selectedUserId, setSelectedUserId] = useState(""); // 선택된 유저
+  const [userList, setUserList] = useState([]); // user 테이블 전체 목록
+  const [userSearch, setUserSearch] = useState(""); // 강사 검색어
+  const [selectedUserId, setSelectedUserId] = useState(""); // 선택된 유저 (user_id 문자열)
+  const [showUserDropdown, setShowUserDropdown] = useState(false); // 드롭다운 표시 여부
   const popupRef = useRef(null);
+  const userSearchRef = useRef(null);
 
   // Supabase에서 교구 목록 fetch
   useEffect(function() {
@@ -155,9 +158,9 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     return function() { document.removeEventListener("mousedown", handleOutside); };
   }, [eqPopup]);
 
-  // auth 유저 목록 로드 (instructors에 없는 유저만 표시)
+  // auth 유저 목록 로드 — user 테이블 전체 조회
   useEffect(function() {
-    sbGet("user_list?select=user_id,email,display_name,role")
+    sbGet("user?select=user_id,user_account,name,email&order=name.asc")
       .then(function(data) {
         if (Array.isArray(data)) setUserList(data);
       })
@@ -277,14 +280,14 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
 
   function addInstructor() {
     if (!selectedUserId) { showToast("추가할 유저를 선택하세요", "warn"); return; }
-    var selectedUser = userList.find(function(u) { return u.user_id === selectedUserId; });
+    var selectedUser = userList.find(function(u) { return String(u.user_id) === String(selectedUserId); });
     if (!selectedUser) return;
 
     (async function() {
       try {
         var res = await sbPost("instructors", {
           user_id: selectedUserId,
-          name: newName.trim() || selectedUser.display_name,
+          name: newName.trim() || selectedUser.name,
           note: newNote.trim() || null,
           is_active: true,
           sort_order: instructors.length + 1
@@ -349,6 +352,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           setNewName(""); 
           setNewNote("");
           setSelectedUserId("");
+          setUserSearch("");
           showToast(savedInst.name + " 강사 추가 완료!");
         }
       } catch(e) {
@@ -690,25 +694,74 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
         </div>
         )}
 
-        {/* 강사 추가 — 유저 목록에서 선택 */}
+        {/* 강사 추가 — user 테이블에서 검색 선택 */}
         <div style={{ marginTop: "10px", background: "#161B27", border: "1px solid #1E293B", borderRadius: "9px", padding: "12px 14px" }}>
           <div style={{ fontSize: "11px", fontWeight: "700", color: "#475569", marginBottom: "10px" }}>+ 강사 추가</div>
           <div style={{ display: "flex", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
-            <select value={selectedUserId} onChange={function(e) {
-              setSelectedUserId(e.target.value);
-              var u = userList.find(function(u) { return u.user_id === e.target.value; });
-              if (u) setNewName(u.display_name || "");
-            }} style={{ flex: 2, minWidth: "160px", padding: "7px 10px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", fontSize: "11px", color: selectedUserId ? "#E2E8F0" : "#64748B", outline: "none" }}>
-              <option value="">유저 선택...</option>
-              {userList
-                .filter(function(u) { return !instructors.some(function(i) { return i.user_id === u.user_id || i.id === u.user_id; }); })
-                .map(function(u) {
-                  return <option key={u.user_id} value={u.user_id}>{u.display_name} ({u.email})</option>;
-                })}
-            </select>
+
+            {/* 검색 가능한 유저 선택 */}
+            <div style={{ flex: 2, minWidth: "200px", position: "relative" }}>
+              <input
+                ref={userSearchRef}
+                value={userSearch}
+                onChange={function(e) {
+                  setUserSearch(e.target.value);
+                  setSelectedUserId("");
+                  setNewName("");
+                  setShowUserDropdown(true);
+                }}
+                onFocus={function() { setShowUserDropdown(true); }}
+                onBlur={function() { setTimeout(function() { setShowUserDropdown(false); }, 150); }}
+                placeholder="강사명 검색... (예: 김은지)"
+                style={{ width: "100%", padding: "7px 10px", background: "#0F1117", border: "1px solid " + (selectedUserId ? "#6366F1" : "#334155"), borderRadius: "6px", fontSize: "11px", color: "#E2E8F0", outline: "none", boxSizing: "border-box" }}
+              />
+              {/* 선택됐을 때 체크 표시 */}
+              {selectedUserId && (
+                <span style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", fontSize: "11px", color: "#22C55E" }}>✓</span>
+              )}
+              {/* 드롭다운 목록 */}
+              {showUserDropdown && userSearch.trim().length >= 1 && (function() {
+                var filtered = userList.filter(function(u) {
+                  var alreadyInstructor = instructors.some(function(i) { return String(i.user_id) === String(u.user_id) || i.name === u.name; });
+                  var matchName = u.name && u.name.includes(userSearch.trim());
+                  var matchAccount = u.user_account && u.user_account.includes(userSearch.trim());
+                  return !alreadyInstructor && (matchName || matchAccount);
+                }).slice(0, 10); // 최대 10개
+                if (filtered.length === 0) return (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "6px", zIndex: 100, padding: "10px", fontSize: "11px", color: "#475569" }}>
+                    검색 결과 없음
+                  </div>
+                );
+                return (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "6px", zIndex: 100, maxHeight: "200px", overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                    {filtered.map(function(u) {
+                      return (
+                        <div key={u.user_id}
+                          onMouseDown={function() {
+                            setSelectedUserId(String(u.user_id));
+                            setUserSearch(u.name + " (" + u.user_account + ")");
+                            setNewName(u.name || "");
+                            setShowUserDropdown(false);
+                          }}
+                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #0F1117", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                          onMouseEnter={function(e) { e.currentTarget.style.background = "#334155"; }}
+                          onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }}>
+                          <div>
+                            <span style={{ fontSize: "12px", fontWeight: "700", color: "#F1F5F9" }}>{u.name}</span>
+                            <span style={{ fontSize: "10px", color: "#64748B", marginLeft: "6px" }}>({u.user_account})</span>
+                          </div>
+                          <span style={{ fontSize: "10px", color: "#475569" }}>{u.email || ""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
             <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="표시 이름 (선택)" onKeyDown={function(e) { if (e.key === "Enter") addInstructor(); }} style={{ flex: 1, minWidth: "120px", padding: "7px 10px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", fontSize: "11px", color: "#E2E8F0", outline: "none" }} />
             <input value={newNote} onChange={function(e) { setNewNote(e.target.value); }} placeholder="비고 (선택)" onKeyDown={function(e) { if (e.key === "Enter") addInstructor(); }} style={{ flex: 1, minWidth: "80px", padding: "7px 10px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", fontSize: "11px", color: "#E2E8F0", outline: "none" }} />
-            <button onClick={addInstructor} style={{ padding: "7px 14px", background: "#6366F1", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>추가</button>
+            <button onClick={addInstructor} style={{ padding: "7px 14px", background: selectedUserId ? "#6366F1" : "#334155", color: selectedUserId ? "#fff" : "#64748B", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: selectedUserId ? "pointer" : "not-allowed" }}>추가</button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", padding: "6px 10px" }}>
             <span style={{ fontSize: "10px", color: "#64748B" }}>교구 간격</span>
