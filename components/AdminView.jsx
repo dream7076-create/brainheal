@@ -221,28 +221,33 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     }
   }
 
-  // 교구별 색상 맵 — 1번 강사 스케줄 기준으로 등장 순서대로 색상 부여
-  // 같은 교구명이면 강사/주차 관계없이 동일 색상 (세로로 추적 가능)
-  var eqColorMap = (function() {
-    var map = {};
+  // ── 색상 로직 ──────────────────────────────────────────────
+  // 1번 강사의 주차별 색상 인덱스를 미리 계산
+  // 규칙: 1번 강사 기준으로 교구가 채워진 주차를 순서대로 순회하며
+  //       1주차=파랑(0), 2주차=초록(1), 3주차=주황(2), 4주차=보라(3), 5주차=핑크(4), 반복
+  // 같은 열(주차)이면 모든 강사에게 동일 색상 적용 → 세로 추적 가능
+  var weekPalMap = (function() {
+    var map = {}; // week → palette index (0~4)
     var ci = 0;
     var firstInst = instructors[0];
     if (firstInst && schedule[firstInst.id]) {
       WEEKS.forEach(function(w) {
         var eq = schedule[firstInst.id][w];
-        if (eq && eq !== "-" && map[eq] === undefined) {
-          map[eq] = ci % 5;
+        if (eq && eq !== "-") {
+          map[w] = ci % 5;
           ci++;
+        } else {
+          map[w] = -1; // 비어있는 주차
         }
       });
     }
     return map;
   })();
 
-  function getEqColorPal(eqName) {
-    if (!eqName || eqName === "-") return null;
-    var idx = eqColorMap[eqName];
-    if (idx === undefined) return null;
+  // 주차로 팔레트 조회 (1번 강사 기준 위치 색상)
+  function getColPal(week) {
+    var idx = weekPalMap[week];
+    if (idx === undefined || idx < 0) return null;
     return PALETTE[idx];
   }
 
@@ -679,10 +684,8 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                 </th>
                 {WEEKS.map(function(w) {
                   var isCur = w === CURRENT_WEEK;
-                  // 헤더는 1번 강사의 해당 주차 교구 색상 사용
-                  var firstInst = instructors[0];
-                  var firstEq = firstInst && schedule[firstInst.id] ? schedule[firstInst.id][w] : null;
-                  var pal = firstEq && firstEq !== "-" ? getEqColorPal(firstEq) : null;
+                  // 헤더 색상 = 해당 주차의 열 색상 (1번 강사 위치 기준)
+                  var pal = getColPal(w);
                   var hBg = pal ? pal.bg : "#161B27";
                   var hColor = pal ? pal.text : "#475569";
                   var hBorder = pal ? pal.border : "#1E293B";
@@ -739,8 +742,8 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                     {WEEKS.map(function(w) {
                       var val = (schedule[inst.id] && schedule[inst.id][w]) || "-";
                       var isCur = w === CURRENT_WEEK;
-                      // 교구명 기준 색상 (같은 교구 = 같은 색, 세로 추적 가능)
-                      var pal = getEqColorPal(val);
+                      // 셀 색상 = 주차 위치 기준 (교구가 있을 때만 색상 적용)
+                      var pal = val !== "-" ? getColPal(w) : null;
                       var cellBg = pal ? pal.bg : rowBase;
                       var isPopupOpen = eqPopup && eqPopup.instId === inst.id && eqPopup.week === w;
                       var log = val !== "-" ? handoverLogs.find(function(l) { return l.instId === inst.id && l.week === w; }) : null;
@@ -862,27 +865,19 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           </div>
         </div>
 
-        {/* 색상 범례 — 1번 강사 교구 순서 기준 */}
+        {/* 색상 범례 — 주차 위치 기준 고정 5색 */}
         <div style={{ marginTop: "8px", marginBottom: "18px", display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" }}>
-          <span style={{ fontSize: "10px", color: "#475569", marginRight: "4px" }}>교구 색상:</span>
-          {(function() {
-            var firstInst = instructors[0];
-            if (!firstInst || !schedule[firstInst.id]) return null;
-            var seen = [];
-            WEEKS.forEach(function(w) {
-              var eq = schedule[firstInst.id][w];
-              if (eq && eq !== "-" && !seen.includes(eq)) seen.push(eq);
-            });
-            return seen.slice(0, 5).map(function(eq, i) {
-              var pal = PALETTE[i % 5];
-              return (
-                <div key={eq} style={{ display: "flex", alignItems: "center", gap: "4px", background: pal.bg, border: "1px solid " + pal.border + "60", borderRadius: "5px", padding: "4px 10px" }}>
-                  <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: pal.border }} />
-                  <span style={{ fontSize: "11px", color: pal.text, fontWeight: "600" }}>{eq}</span>
-                </div>
-              );
-            });
-          })()}
+          <span style={{ fontSize: "10px", color: "#475569", marginRight: "4px" }}>열 색상 (1번 강사 기준):</span>
+          {[["1번째 교구","파랑"],["2번째 교구","초록"],["3번째 교구","주황"],["4번째 교구","보라"],["5번째 교구","핑크"]].map(function(item, i) {
+            var pal = PALETTE[i];
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: "4px", background: pal.bg, border: "1px solid " + pal.border + "60", borderRadius: "5px", padding: "4px 10px" }}>
+                <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: pal.border }} />
+                <span style={{ fontSize: "11px", color: pal.text, fontWeight: "600" }}>{item[1]}</span>
+              </div>
+            );
+          })}
+          <span style={{ fontSize: "10px", color: "#334155", marginLeft: "4px" }}>· 6번째부터 반복</span>
         </div>
       </div>
 
