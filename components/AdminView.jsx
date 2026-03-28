@@ -362,15 +362,21 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   }
 
   function removeInstructor(id) {
-    // rotation_schedule에서 해당 강사의 모든 배정 삭제
     (async function() {
       try {
+        // 1. rotation_schedule 삭제
         await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq.main");
+        // 2. handover_logs 삭제
+        await sbDelete("handover_logs?instructor_id=eq." + id);
+        // 3. instructors 테이블에서 삭제
+        await sbDelete("instructors?id=eq." + id);
+        console.log("✅ 강사 DB 삭제 완료:", id);
       } catch(e) {
-        console.error("rotation_schedule 삭제 실패:", e);
+        console.error("강사 삭제 실패:", e);
+        showToast("강사 삭제 실패: " + e.message, "warn");
       }
     })();
-    
+
     setInstructors(function(prev) { return prev.filter(function(i) { return i.id !== id; }); });
     setSchedule(function(prev) { var n = Object.assign({}, prev); delete n[id]; return n; });
   }
@@ -382,17 +388,23 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   }
 
   function doRemoveSelected(ids) {
-    // rotation_schedule에서 해당 강사들의 모든 배정 삭제
     (async function() {
       try {
         for (var id of ids) {
+          // 1. rotation_schedule 삭제
           await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq.main");
+          // 2. handover_logs 삭제
+          await sbDelete("handover_logs?instructor_id=eq." + id);
+          // 3. instructors 테이블에서 삭제
+          await sbDelete("instructors?id=eq." + id);
         }
+        console.log("✅ 선택 강사 DB 삭제 완료:", ids.length, "명");
       } catch(e) {
-        console.error("rotation_schedule 삭제 실패:", e);
+        console.error("선택 강사 삭제 실패:", e);
+        showToast("삭제 실패: " + e.message, "warn");
       }
     })();
-    
+
     setInstructors(function(prev) { return prev.filter(function(i) { return !ids.includes(i.id); }); });
     setSchedule(function(prev) { var n = Object.assign({}, prev); ids.forEach(function(id) { delete n[id]; }); return n; });
     setSelectedFromIdx(null);
