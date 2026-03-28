@@ -222,11 +222,9 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   }
 
   // ── 색상 로직 ──────────────────────────────────────────────
-  // 1번 강사의 주차별 색상 인덱스를 미리 계산
-  // 규칙: 1번 강사 기준으로 교구가 채워진 주차를 순서대로 순회하며
-  //       1주차=파랑(0), 2주차=초록(1), 3주차=주황(2), 4주차=보라(3), 5주차=핑크(4), 반복
-  // 같은 열(주차)이면 모든 강사에게 동일 색상 적용 → 세로 추적 가능
-  var weekPalMap = (function() {
+  // 1번 강사의 주차 순서대로 색상 인덱스 고정
+  // (교구가 채워진 주차 순서: 1번째=파랑, 2번째=초록, 3번째=주황, 4번째=보라, 5번째=핑크, 반복)
+  var firstInstWeekPalMap = (function() {
     var map = {}; // week → palette index (0~4)
     var ci = 0;
     var firstInst = instructors[0];
@@ -237,18 +235,25 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           map[w] = ci % 5;
           ci++;
         } else {
-          map[w] = -1; // 비어있는 주차
+          map[w] = -1;
         }
       });
     }
     return map;
   })();
 
-  // 주차로 팔레트 조회 (1번 강사 기준 위치 색상)
-  function getColPal(week) {
-    var idx = weekPalMap[week];
-    if (idx === undefined || idx < 0) return null;
-    return PALETTE[idx];
+  // 강사 rowIdx번째 강사의 week 셀 색상 조회
+  // rowIdx × shiftAmount만큼 역방향으로 거슬러서 1번 강사의 주차 색상 참조
+  // → "1번 강사 기준 색상이 shiftAmount 간격으로 아래 강사에게 밀려 내려오는" 효과
+  function getInstColPal(week, rowIdx) {
+    var weekIdx = WEEKS.indexOf(week);
+    var srcWeekIdx = weekIdx - rowIdx * shiftAmount;
+    // 범위 밖이면 wrap (순환)
+    var wrappedIdx = ((srcWeekIdx % WEEKS.length) + WEEKS.length) % WEEKS.length;
+    var srcWeek = WEEKS[wrappedIdx];
+    var palIdx = firstInstWeekPalMap[srcWeek];
+    if (palIdx === undefined || palIdx < 0) return null;
+    return PALETTE[palIdx];
   }
 
   var shiftAmount = shiftAmounts[activeSheetId] || 1;
@@ -684,8 +689,8 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                 </th>
                 {WEEKS.map(function(w) {
                   var isCur = w === CURRENT_WEEK;
-                  // 헤더 색상 = 해당 주차의 열 색상 (1번 강사 위치 기준)
-                  var pal = getColPal(w);
+                  // 헤더 = 1번 강사(rowIdx=0) 기준 색상
+                  var pal = getInstColPal(w, 0);
                   var hBg = pal ? pal.bg : "#161B27";
                   var hColor = pal ? pal.text : "#475569";
                   var hBorder = pal ? pal.border : "#1E293B";
@@ -742,8 +747,9 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                     {WEEKS.map(function(w) {
                       var val = (schedule[inst.id] && schedule[inst.id][w]) || "-";
                       var isCur = w === CURRENT_WEEK;
-                      // 셀 색상 = 주차 위치 기준 (교구가 있을 때만 색상 적용)
-                      var pal = val !== "-" ? getColPal(w) : null;
+                      // 셀 색상 = 1번 강사 기준에서 rowIdx × shiftAmount 만큼 밀린 색상
+                      // 교구가 있는 셀만 색상 적용
+                      var pal = val !== "-" ? getInstColPal(w, rowIdx) : null;
                       var cellBg = pal ? pal.bg : rowBase;
                       var isPopupOpen = eqPopup && eqPopup.instId === inst.id && eqPopup.week === w;
                       var log = val !== "-" ? handoverLogs.find(function(l) { return l.instId === inst.id && l.week === w; }) : null;
