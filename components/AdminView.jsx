@@ -160,7 +160,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
 
   // auth 유저 목록 로드 — user 테이블 전체 조회
   useEffect(function() {
-    sbGet("user?select=user_id,user_account,name,email&order=name.asc")
+    sbGet("user?select=user_id,user_account,name,email,phone,address&order=name.asc")
       .then(function(data) {
         if (Array.isArray(data)) setUserList(data);
       })
@@ -286,7 +286,6 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     (async function() {
       try {
         var res = await sbPost("instructors", {
-          user_id: selectedUserId,
           name: newName.trim() || selectedUser.name,
           note: newNote.trim() || null,
           is_active: true,
@@ -739,18 +738,20 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                         <div key={u.user_id}
                           onMouseDown={function() {
                             setSelectedUserId(String(u.user_id));
-                            setUserSearch(u.name + " (" + u.user_account + ")");
+                            setUserSearch(u.name);
                             setNewName(u.name || "");
                             setShowUserDropdown(false);
                           }}
-                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #0F1117", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #0F1117" }}
                           onMouseEnter={function(e) { e.currentTarget.style.background = "#334155"; }}
                           onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }}>
-                          <div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2px" }}>
                             <span style={{ fontSize: "12px", fontWeight: "700", color: "#F1F5F9" }}>{u.name}</span>
-                            <span style={{ fontSize: "10px", color: "#64748B", marginLeft: "6px" }}>({u.user_account})</span>
+                            <span style={{ fontSize: "10px", color: "#64748B" }}>{u.phone || "연락처 없음"}</span>
                           </div>
-                          <span style={{ fontSize: "10px", color: "#475569" }}>{u.email || ""}</span>
+                          <div style={{ fontSize: "10px", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.address || "주소 없음"}
+                          </div>
                         </div>
                       );
                     })}
