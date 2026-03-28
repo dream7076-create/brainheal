@@ -28,22 +28,24 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     { id: "sheet1", dbSheetId: "main", title: "실버체육 로테이션 2026", instructors: initInstructors, schedule: initSchedule }
   ]);
 
-  // DB 데이터가 로드되면 메인 시트 갱신
+  // DB 데이터가 로드되면 메인 시트 갱신 (초기 1회만)
+  const isInitialLoad = useRef(true);
   useEffect(function() {
+    if (!isInitialLoad.current) return; // 초기 로드 이후엔 실행 안 함
     if (dbInstructors && dbSchedule && Object.keys(dbSchedule).length > 0) {
+      isInitialLoad.current = false;
       setSheets(function(prev) {
         return prev.map(function(s) {
           if (s.id !== "sheet1") return s;
-          // 기존 시트 schedule과 merge (로컬에서 추가된 강사 스케줄 보존)
           var mergedSchedule = Object.assign({}, s.schedule, dbSchedule);
           return Object.assign({}, s, { instructors: dbInstructors, schedule: mergedSchedule });
         });
       });
     } else if (dbInstructors && dbInstructors.length > 0) {
+      isInitialLoad.current = false;
       setSheets(function(prev) {
         return prev.map(function(s) {
           if (s.id !== "sheet1") return s;
-          // 기존 schedule 유지하면서 새 강사만 빈 스케줄 추가
           var mergedSchedule = Object.assign({}, s.schedule);
           dbInstructors.forEach(function(inst) {
             if (!mergedSchedule[inst.id]) {
@@ -348,7 +350,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
             newRow[week] = (lastInst && schedule[lastInst.id] && schedule[lastInst.id][WEEKS[srcIdx]]) || "-";
           });
           
-          // dbInstructors 업데이트 (useEffect가 시트 자동 갱신)
+          // 현재 활성 시트에 직접 강사 추가 (setDbInstructors 사용 안 함 → sheet1 덮어쓰기 방지)
           var newInstEntry = {
             id: savedInstId,
             name: savedInst.name,
@@ -356,11 +358,11 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
             note: savedInst.note || "",
             sort_order: savedInst.sort_order
           };
-          setDbInstructors(function(prev) {
-            return prev ? prev.concat([newInstEntry]) : [newInstEntry];
+          setInstructors(function(prev) {
+            return prev.concat([newInstEntry]);
           });
 
-          // 새 강사 스케줄 로컬 반영 (useEffect는 dbSchedule 변경 없으면 갱신 안 함)
+          // 새 강사 스케줄 현재 시트에 반영
           setSchedule(function(prev) {
             var next = Object.assign({}, prev);
             next[savedInstId] = newRow;
@@ -475,15 +477,8 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
         region: newRegion,
       });
 
-      // 2. 로컬 state 업데이트
+      // 2. 현재 활성 시트 강사 목록만 업데이트 (setDbInstructors 제거 → sheet1 덮어쓰기 방지)
       setInstructors(function(prev) {
-        return prev.map(function(i) {
-          if (i.id !== instId) return i;
-          return Object.assign({}, i, { name: newName, region: newRegion || "" });
-        });
-      });
-      setDbInstructors(function(prev) {
-        if (!prev) return prev;
         return prev.map(function(i) {
           if (i.id !== instId) return i;
           return Object.assign({}, i, { name: newName, region: newRegion || "" });
