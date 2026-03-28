@@ -200,10 +200,9 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     }
   }
 
-  async function removeSheet(id) {
+  async function doRemoveSheet(id) {
     if (sheets.length === 1) { showToast("마지막 시트는 삭제할 수 없습니다"); return; }
     try {
-      // 해당 시트의 강사 목록 조회 후 관련 데이터 삭제
       var instIds = instructors.map(i => i.id);
       if (instIds.length > 0) {
         for (var iid of instIds) {
@@ -220,6 +219,13 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     } catch(e) {
       showToast("시트 삭제 실패: " + e.message, "warn");
     }
+    setConfirmTarget(null);
+  }
+
+  function removeSheet(id) {
+    if (sheets.length === 1) { showToast("마지막 시트는 삭제할 수 없습니다"); return; }
+    var sheet = sheets.find(s => s.id === id);
+    setConfirmTarget({ type: "sheet", id, name: sheet ? sheet.title : id });
   }
 
   async function saveSheetTitle(id) {
@@ -351,10 +357,10 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   }
 
   function removeSelected() {
-    if (!selectedFromIdx === null || !instructors[selectedFromIdx]) return;
-    var ids = instructors.slice(selectedFromIdx).map(i => i.id);
-    var names = ids.map(id => (instructors.find(i => i.id === id) || {}).name || id);
-    setConfirmTarget({ type: "selected", names, ids });
+    if (selectedFromIdx === null || !instructors[selectedFromIdx]) return;
+    // 선택한 행 1개만 삭제 (이하 전체 X)
+    var inst = instructors[selectedFromIdx];
+    setConfirmTarget({ type: "single", id: inst.id, name: inst.name });
   }
 
   async function doRemoveSelected(ids) {
@@ -543,7 +549,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
             {selectedIds ? (instructors[selectedFromIdx] && instructors[selectedFromIdx].name + " 이하 " + selectedIds.length + "명 선택") : "전체 이동"}
           </span>
           {selectedIds && <button onClick={() => setSelectedFromIdx(null)} style={{ padding: "2px 6px", borderRadius: "4px", border: "1px solid #334155", background: "#0F1117", color: "#94A3B8", cursor: "pointer", fontSize: "9px" }}>선택 해제</button>}
-          {selectedIds && <button onClick={removeSelected} style={{ padding: "3px 10px", borderRadius: "4px", border: "1px solid #EF444460", background: "#1F0E0E", color: "#F87171", cursor: "pointer", fontSize: "9px", fontWeight: "700" }}>🗑 선택 삭제</button>}
           <span style={{ color: "#334155" }}>|</span>
           <button onClick={() => setShiftDir("back")} style={{ padding: "3px 8px", borderRadius: "4px", border: "none", cursor: "pointer", fontSize: "10px", fontWeight: "600", background: shiftDir === "back" ? "#6366F1" : "#0F1117", color: shiftDir === "back" ? "#fff" : "#475569" }}>← 앞으로</button>
           <button onClick={() => setShiftDir("forward")} style={{ padding: "3px 8px", borderRadius: "4px", border: "none", cursor: "pointer", fontSize: "10px", fontWeight: "600", background: shiftDir === "forward" ? "#6366F1" : "#0F1117", color: shiftDir === "forward" ? "#fff" : "#475569" }}>뒤로 →</button>
@@ -602,19 +607,25 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                           {isSelected ? "☑" : "☐"}
                         </button>
                       </td>
-                      <td style={{ padding: "0 10px 0 6px", position: "sticky", left: "36px", zIndex: 1, background: rowBase, borderRight: "1px solid #1E293B" }}>
+                      <td style={{ padding: "0 8px 0 6px", position: "sticky", left: "36px", zIndex: 1, background: rowBase, borderRight: "1px solid #1E293B", minWidth: "130px" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                          <div onClick={() => { setReplaceModal({ instId: inst.id, instName: inst.name }); setReplaceSearch(""); setReplaceSelectedUser(null); }}
-                            title="클릭하여 강사 교체" style={{ cursor: "pointer" }}>
-                            <div style={{ fontSize: "13px", fontWeight: "700", color: isSelected ? "#A5B4FC" : "#E2E8F0", whiteSpace: "nowrap" }}>
-                              {inst.name}<span style={{ fontSize: "9px", color: "#334155", marginLeft: "4px" }}>✎</span>
+                          {/* 강사명 */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: "13px", fontWeight: "700", color: isSelected ? "#A5B4FC" : "#E2E8F0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {inst.name}
                             </div>
-                            {inst.note && <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px" }}>{inst.note}</div>}
+                            {inst.note && <div style={{ fontSize: "10px", color: "#475569", marginTop: "1px" }}>{inst.note}</div>}
                           </div>
-                          <button onClick={e => { e.stopPropagation(); setConfirmTarget({ type: "single", id: inst.id, name: inst.name }); }}
-                            onMouseEnter={() => setHoveredDelId(inst.id)}
-                            onMouseLeave={() => setHoveredDelId(null)}
-                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: "13px", padding: "4px 3px", opacity: hoveredDelId === inst.id ? 1 : 0, color: "#EF4444", transition: "opacity 0.15s" }}>🗑</button>
+                          {/* 교체 버튼 */}
+                          <button
+                            onClick={e => { e.stopPropagation(); setReplaceModal({ instId: inst.id, instName: inst.name }); setReplaceSearch(""); setReplaceSelectedUser(null); }}
+                            title="강사 교체"
+                            style={{ flexShrink: 0, background: "none", border: "1px solid #334155", borderRadius: "4px", cursor: "pointer", fontSize: "11px", padding: "3px 6px", color: "#64748B", lineHeight: 1 }}>✎</button>
+                          {/* 삭제 버튼 */}
+                          <button
+                            onClick={e => { e.stopPropagation(); setConfirmTarget({ type: "single", id: inst.id, name: inst.name }); }}
+                            title={inst.name + " 삭제"}
+                            style={{ flexShrink: 0, background: "none", border: "1px solid #7F1D1D44", borderRadius: "4px", cursor: "pointer", fontSize: "11px", padding: "3px 6px", color: "#EF4444", lineHeight: 1 }}>🗑</button>
                         </div>
                       </td>
                       {WEEKS.map(function(w) {
@@ -859,13 +870,33 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" }}
           onMouseDown={e => { if (e.target === e.currentTarget) setConfirmTarget(null); }}>
           <div style={{ background: "#1E293B", borderRadius: "14px", border: "1px solid #334155", padding: "24px 28px", minWidth: "260px", maxWidth: "340px", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: "#F1F5F9", marginBottom: "10px" }}>{confirmTarget.type === "single" ? "강사 삭제" : "선택 강사 삭제"}</div>
-            <div style={{ fontSize: "12px", color: "#94A3B8", marginBottom: "20px", lineHeight: "1.7" }}>
-              {confirmTarget.type === "single" ? confirmTarget.name + " 강사를 삭제하시겠습니까?" : confirmTarget.names.join(", ") + " 외 " + confirmTarget.ids.length + "명을 삭제하시겠습니까?"}
+
+            {/* 제목 */}
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#F1F5F9", marginBottom: "10px" }}>
+              {confirmTarget.type === "sheet" ? "🗂 시트 삭제" : "강사 삭제"}
             </div>
+
+            {/* 내용 */}
+            <div style={{ fontSize: "12px", color: "#94A3B8", marginBottom: "8px", lineHeight: "1.7" }}>
+              {confirmTarget.type === "sheet"
+                ? <><span style={{ color: "#F87171", fontWeight: "700" }}>"{confirmTarget.name}"</span> 시트를 삭제하시겠습니까?</>
+                : <><span style={{ color: "#F87171", fontWeight: "700" }}>{confirmTarget.name}</span> 강사를 삭제하시겠습니까?</>
+              }
+            </div>
+            {confirmTarget.type === "sheet" && (
+              <div style={{ fontSize: "11px", color: "#EF4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "7px", padding: "8px 12px", marginBottom: "16px", lineHeight: "1.6" }}>
+                ⚠ 시트에 등록된 강사 {instructors.length}명과 모든 로테이션 데이터가 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+              </div>
+            )}
+            {confirmTarget.type !== "sheet" && <div style={{ marginBottom: "16px" }} />}
+
             <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmTarget(null)} style={{ padding: "7px 16px", borderRadius: "7px", border: "1px solid #334155", background: "#0F1117", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>취소</button>
-              <button onClick={() => { if (confirmTarget.type === "single") doRemoveSingle(confirmTarget.id, confirmTarget.name); else doRemoveSelected(confirmTarget.ids); }}
+              <button onClick={() => setConfirmTarget(null)}
+                style={{ padding: "7px 16px", borderRadius: "7px", border: "1px solid #334155", background: "#0F1117", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>취소</button>
+              <button onClick={() => {
+                if (confirmTarget.type === "sheet") doRemoveSheet(confirmTarget.id);
+                else doRemoveSingle(confirmTarget.id, confirmTarget.name);
+              }}
                 style={{ padding: "7px 18px", borderRadius: "7px", border: "none", background: "#DC2626", color: "#fff", cursor: "pointer", fontSize: "12px", fontWeight: "700" }}>삭제</button>
             </div>
           </div>
