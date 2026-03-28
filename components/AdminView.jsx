@@ -787,16 +787,75 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                 </div>
               </div>
               <div style={{ overflowY: "auto", flex: 1 }}>
-                {(eqSearch === "" ? eqList : eqList.filter(eq => eq.includes(eqSearch))).map(eq => {
-                  var isSelected = eq === eqPopup.currentVal;
-                  return (
-                    <button key={eq} onClick={() => { var affected = instructors.length - 1 - instructors.findIndex(i => i.id === eqPopup.instId); applyCellAndCascade(eqPopup.instId, eqPopup.week, eq); showToast(eq + " 변경 · 아래 " + affected + "명 자동 편성"); setEqPopup(null); setEqSearch(""); }}
-                      style={{ width: "100%", padding: "13px 18px", background: isSelected ? "#1E2A4A" : "transparent", border: "none", borderBottom: "1px solid #1E293B", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span style={{ fontSize: "14px", fontWeight: isSelected ? "800" : "500", color: isSelected ? "#A5B4FC" : "#CBD5E1", flex: 1 }}>{eq}</span>
-                      {isSelected && <span style={{ fontSize: "11px", color: "#6366F1", fontWeight: "700" }}>현재 ✓</span>}
-                    </button>
-                  );
-                })}
+                {(function() {
+                  var filtered = eqSearch === "" ? eqList : eqList.filter(eq => eq.includes(eqSearch));
+                  if (filtered.length === 0 && eqSearch.trim()) {
+                    // 검색 결과 없음 → 신규 교구 추가 버튼
+                    return (
+                      <div style={{ padding: "20px 18px", textAlign: "center" }}>
+                        <div style={{ fontSize: "12px", color: "#475569", marginBottom: "12px" }}>
+                          <span style={{ color: "#A5B4FC", fontWeight: "700" }}>"{eqSearch}"</span> 검색 결과 없음
+                        </div>
+                        <button onClick={async function() {
+                          var newEqName = eqSearch.trim();
+                          if (!newEqName) return;
+                          try {
+                            await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                            setEqList(prev => prev.concat([newEqName]).sort());
+                            showToast(newEqName + " 교구 추가 완료!");
+                          } catch(e) {
+                            // DB 실패 시 로컬에만 추가
+                            setEqList(prev => prev.concat([newEqName]).sort());
+                            showToast(newEqName + " 추가 (로컬)");
+                          }
+                        }}
+                          style={{ width: "100%", padding: "12px 18px", background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                          + "{eqSearch}" 교구 DB에 추가
+                        </button>
+                        <div style={{ fontSize: "10px", color: "#334155", marginTop: "8px" }}>equipment 테이블에 저장됩니다</div>
+                      </div>
+                    );
+                  }
+                  return filtered.map(eq => {
+                    var isSelected = eq === eqPopup.currentVal;
+                    return (
+                      <button key={eq} onClick={() => { var affected = instructors.length - 1 - instructors.findIndex(i => i.id === eqPopup.instId); applyCellAndCascade(eqPopup.instId, eqPopup.week, eq); showToast(eq + " 변경 · 아래 " + affected + "명 자동 편성"); setEqPopup(null); setEqSearch(""); }}
+                        style={{ width: "100%", padding: "13px 18px", background: isSelected ? "#1E2A4A" : "transparent", border: "none", borderBottom: "1px solid #1E293B", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ fontSize: "14px", fontWeight: isSelected ? "800" : "500", color: isSelected ? "#A5B4FC" : "#CBD5E1", flex: 1 }}>{eq}</span>
+                        {isSelected && <span style={{ fontSize: "11px", color: "#6366F1", fontWeight: "700" }}>현재 ✓</span>}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* 하단 고정: 새 교구 직접 입력 */}
+              <div style={{ borderTop: "1px solid #1E293B", padding: "10px 14px", flexShrink: 0, display: "flex", gap: "7px" }}>
+                <input
+                  id="newEqDirectInput"
+                  placeholder="새 교구명 직접 입력..."
+                  style={{ flex: 1, padding: "8px 11px", background: "#0F1117", border: "1.5px solid #334155", borderRadius: "8px", fontSize: "12px", color: "#F1F5F9", outline: "none", boxSizing: "border-box" }}
+                  onKeyDown={e => { if (e.key === "Enter") e.currentTarget.nextSibling.click(); }}
+                />
+                <button onClick={async function() {
+                  var input = document.getElementById("newEqDirectInput");
+                  var newEqName = input ? input.value.trim() : "";
+                  if (!newEqName) return;
+                  if (eqList.includes(newEqName)) { showToast("이미 존재하는 교구입니다", "warn"); return; }
+                  try {
+                    await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                    setEqList(prev => prev.concat([newEqName]).sort());
+                    showToast(newEqName + " 교구 추가 완료!");
+                    if (input) input.value = "";
+                  } catch(e) {
+                    setEqList(prev => prev.concat([newEqName]).sort());
+                    showToast(newEqName + " 추가 (로컬)");
+                    if (input) input.value = "";
+                  }
+                }}
+                  style={{ padding: "8px 14px", background: "#6366F1", color: "#fff", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap" }}>
+                  + 추가
+                </button>
               </div>
             </div>
           </div>
