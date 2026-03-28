@@ -221,9 +221,30 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     }
   }
 
-  // 주차별 색상 맵 (첫 번째 강사 기준으로 실시간 계산)
-  var firstInstId = instructors[0] ? instructors[0].id : null;
-  var weekColorMap = firstInstId ? calcWeekColors(schedule, firstInstId, WEEKS) : WEEK_COLOR_INDEX;
+  // 교구별 색상 맵 — 1번 강사 스케줄 기준으로 등장 순서대로 색상 부여
+  // 같은 교구명이면 강사/주차 관계없이 동일 색상 (세로로 추적 가능)
+  var eqColorMap = (function() {
+    var map = {};
+    var ci = 0;
+    var firstInst = instructors[0];
+    if (firstInst && schedule[firstInst.id]) {
+      WEEKS.forEach(function(w) {
+        var eq = schedule[firstInst.id][w];
+        if (eq && eq !== "-" && map[eq] === undefined) {
+          map[eq] = ci % 5;
+          ci++;
+        }
+      });
+    }
+    return map;
+  })();
+
+  function getEqColorPal(eqName) {
+    if (!eqName || eqName === "-") return null;
+    var idx = eqColorMap[eqName];
+    if (idx === undefined) return null;
+    return PALETTE[idx];
+  }
 
   var shiftAmount = shiftAmounts[activeSheetId] || 1;
   var shiftDir = shiftDirs[activeSheetId] || "forward";
@@ -658,14 +679,17 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                 </th>
                 {WEEKS.map(function(w) {
                   var isCur = w === CURRENT_WEEK;
-                  var pal = getWeekPalette(w, weekColorMap);
+                  // 헤더는 1번 강사의 해당 주차 교구 색상 사용
+                  var firstInst = instructors[0];
+                  var firstEq = firstInst && schedule[firstInst.id] ? schedule[firstInst.id][w] : null;
+                  var pal = firstEq && firstEq !== "-" ? getEqColorPal(firstEq) : null;
                   var hBg = pal ? pal.bg : "#161B27";
-                  var hColor = pal ? pal.text : "#334155";
-                  var hBorder = pal ? pal.border : "#334155";
+                  var hColor = pal ? pal.text : "#475569";
+                  var hBorder = pal ? pal.border : "#1E293B";
                   return (
-                    <th key={w} style={{ padding: "7px 5px", fontSize: "10px", textAlign: "center", whiteSpace: "nowrap", minWidth: "72px", fontWeight: "700", background: isCur ? "#1E2A4A" : hBg, color: isCur ? "#818CF8" : hColor, borderBottom: "2px solid " + (isCur ? "#6366F1" : hBorder), borderLeft: "1px solid " + hBorder + "40", outline: isCur ? "2px solid #6366F1" : "none", outlineOffset: "-2px" }}>
+                    <th key={w} style={{ padding: "8px 5px", fontSize: "11px", textAlign: "center", whiteSpace: "nowrap", minWidth: "80px", fontWeight: "700", background: isCur ? "#1E2A4A" : hBg, color: isCur ? "#818CF8" : hColor, borderBottom: "2px solid " + (isCur ? "#6366F1" : hBorder), borderLeft: "1px solid " + hBorder + "40", outline: isCur ? "2px solid #6366F1" : "none", outlineOffset: "-2px" }}>
                       {WEEK_LABELS[w]}
-                      {isCur && <div style={{ fontSize: "8px", marginTop: "2px", color: "#818CF8" }}>현재</div>}
+                      {isCur && <div style={{ fontSize: "9px", marginTop: "2px", color: "#818CF8" }}>현재</div>}
                     </th>
                   );
                 })}
@@ -677,7 +701,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                 var isAnchor = selectedFromIdx === rowIdx;
                 var rowBase = isSelected ? "#161B36" : (rowIdx % 2 === 0 ? "#0F1117" : "#0D111D");
                 return (
-                  <tr key={inst.id} style={{ borderBottom: "1px solid #161B27", outline: isAnchor ? "2px solid #6366F1" : isSelected ? "1px solid rgba(99,102,241,0.3)" : "none", outlineOffset: "-1px", height: "52px" }}>
+                  <tr key={inst.id} style={{ borderBottom: "1px solid #161B27", outline: isAnchor ? "2px solid #6366F1" : isSelected ? "1px solid rgba(99,102,241,0.3)" : "none", outlineOffset: "-1px", height: "58px" }}>
                     {/* 이동 선택 체크박스 */}
                     <td style={{ padding: "0 6px 0 10px", position: "sticky", left: 0, zIndex: 1, background: rowBase, textAlign: "center", width: "28px" }}>
                       <button
@@ -687,17 +711,17 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                         {isSelected ? "☑" : "☐"}
                       </button>
                     </td>
-                    <td style={{ padding: "0 8px 0 6px", position: "sticky", left: "36px", zIndex: 1, background: rowBase, borderRight: "1px solid #1E293B" }}>
+                    <td style={{ padding: "0 10px 0 6px", position: "sticky", left: "36px", zIndex: 1, background: rowBase, borderRight: "1px solid #1E293B" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
                         <div
                           onClick={function() { setReplaceModal({ instId: inst.id, instName: inst.name }); setReplaceSearch(""); setReplaceSelectedUser(null); }}
                           title="클릭하여 강사 교체"
                           style={{ cursor: "pointer" }}>
-                          <div style={{ fontSize: "11px", fontWeight: "600", color: isSelected ? "#A5B4FC" : "#CBD5E1", whiteSpace: "nowrap" }}>
+                          <div style={{ fontSize: "13px", fontWeight: "700", color: isSelected ? "#A5B4FC" : "#E2E8F0", whiteSpace: "nowrap" }}>
                             {inst.name}
-                            <span style={{ fontSize: "8px", color: "#334155", marginLeft: "4px" }}>✎</span>
+                            <span style={{ fontSize: "9px", color: "#334155", marginLeft: "4px" }}>✎</span>
                           </div>
-                          {inst.note ? <div style={{ fontSize: "9px", color: "#475569", marginTop: "2px" }}>{inst.note}</div> : null}
+                          {inst.note ? <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px" }}>{inst.note}</div> : null}
                         </div>
                         <button
                           onClick={function(e) {
@@ -715,30 +739,30 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                     {WEEKS.map(function(w) {
                       var val = (schedule[inst.id] && schedule[inst.id][w]) || "-";
                       var isCur = w === CURRENT_WEEK;
-                      var pal = val !== "-" ? getWeekPalette(w, weekColorMap) : null;
+                      // 교구명 기준 색상 (같은 교구 = 같은 색, 세로 추적 가능)
+                      var pal = getEqColorPal(val);
                       var cellBg = pal ? pal.bg : rowBase;
                       var isPopupOpen = eqPopup && eqPopup.instId === inst.id && eqPopup.week === w;
-                      // 수량 이력 조회
                       var log = val !== "-" ? handoverLogs.find(function(l) { return l.instId === inst.id && l.week === w; }) : null;
                       var qtyBadge = null;
                       if (log) {
                         var diff = BASE_QTY - log.qty;
                         if (diff > 3) {
-                          qtyBadge = <div onClick={function(e) { e.stopPropagation(); var cellLogs = handoverLogs.filter(function(l) { return l.instId === inst.id && l.week === w; }); setEqPopup({ instId: inst.id, week: w, currentVal: val, logs: cellLogs, view: "history" }); setEqSearch(""); }} style={{ fontSize: "8px", fontWeight: "800", color: "#EF4444", background: "rgba(239,68,68,0.18)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: "3px", padding: "2px 5px", marginTop: "3px", lineHeight: "14px", whiteSpace: "nowrap", cursor: "pointer", display: "inline-block" }}>⚠ {log.qty}개</div>;
+                          qtyBadge = <div onClick={function(e) { e.stopPropagation(); var cellLogs = handoverLogs.filter(function(l) { return l.instId === inst.id && l.week === w; }); setEqPopup({ instId: inst.id, week: w, currentVal: val, logs: cellLogs, view: "history" }); setEqSearch(""); }} style={{ fontSize: "9px", fontWeight: "800", color: "#EF4444", background: "rgba(239,68,68,0.18)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: "3px", padding: "2px 5px", marginTop: "3px", lineHeight: "14px", whiteSpace: "nowrap", cursor: "pointer", display: "inline-block" }}>⚠ {log.qty}개</div>;
                         } else if (diff > 0) {
-                          qtyBadge = <div onClick={function(e) { e.stopPropagation(); var cellLogs = handoverLogs.filter(function(l) { return l.instId === inst.id && l.week === w; }); setEqPopup({ instId: inst.id, week: w, currentVal: val, logs: cellLogs, view: "history" }); setEqSearch(""); }} style={{ fontSize: "8px", fontWeight: "600", color: "#94A3B8", background: "rgba(148,163,184,0.15)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "3px", padding: "2px 5px", marginTop: "3px", lineHeight: "14px", whiteSpace: "nowrap", cursor: "pointer", display: "inline-block" }}>{log.qty}개</div>;
+                          qtyBadge = <div onClick={function(e) { e.stopPropagation(); var cellLogs = handoverLogs.filter(function(l) { return l.instId === inst.id && l.week === w; }); setEqPopup({ instId: inst.id, week: w, currentVal: val, logs: cellLogs, view: "history" }); setEqSearch(""); }} style={{ fontSize: "9px", fontWeight: "600", color: "#94A3B8", background: "rgba(148,163,184,0.15)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "3px", padding: "2px 5px", marginTop: "3px", lineHeight: "14px", whiteSpace: "nowrap", cursor: "pointer", display: "inline-block" }}>{log.qty}개</div>;
                         }
                       }
                       return (
-                        <td key={w} style={{ padding: "0", textAlign: "center", background: isPopupOpen ? "#1E2A4A" : cellBg, borderLeft: "1px solid " + (pal ? pal.border + "30" : "#1E293B"), outline: isPopupOpen ? "2px solid #6366F1" : isCur ? "2px solid rgba(99,102,241,0.4)" : "none", outlineOffset: "-2px", position: "relative", cursor: "pointer", minWidth: "72px" }}
+                        <td key={w} style={{ padding: "0", textAlign: "center", background: isPopupOpen ? "#1E2A4A" : cellBg, borderLeft: "1px solid " + (pal ? pal.border + "30" : "#1E293B"), outline: isPopupOpen ? "2px solid #6366F1" : isCur ? "2px solid rgba(99,102,241,0.4)" : "none", outlineOffset: "-2px", position: "relative", cursor: "pointer", minWidth: "80px" }}
                           onClick={function(e) {
                             var rect = e.currentTarget.getBoundingClientRect();
                             var cellLogs = handoverLogs.filter(function(l) { return l.instId === inst.id && l.week === w; });
                             setEqPopup({ instId: inst.id, week: w, currentVal: val, x: rect.left, y: rect.bottom, logs: cellLogs, view: "select" });
                             setEqSearch("");
                           }}>
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "52px", padding: "0 4px" }}>
-                            <div style={{ fontSize: "10px", fontWeight: val !== "-" ? "700" : "400", color: pal ? pal.text : "#2D3748", whiteSpace: "nowrap" }}>{val}</div>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "58px", padding: "0 4px" }}>
+                            <div style={{ fontSize: "12px", fontWeight: val !== "-" ? "700" : "400", color: pal ? pal.text : "#2D3748", whiteSpace: "nowrap" }}>{val}</div>
                             {qtyBadge}
                           </div>
                         </td>
@@ -838,18 +862,27 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           </div>
         </div>
 
-        {/* 색상 범례 */}
+        {/* 색상 범례 — 1번 강사 교구 순서 기준 */}
         <div style={{ marginTop: "8px", marginBottom: "18px", display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" }}>
-          <span style={{ fontSize: "9px", color: "#475569", marginRight: "4px" }}>색상 기준 (경기-김정희 순서):</span>
-          {[["보치아","파랑"],["종이컵챌린지","초록"],["요요볼","주황"],["스틱검도","보라"],["성게볼놀이","빨강"]].map(function(item, i) {
-            var pal = PALETTE[i];
-            return (
-              <div key={item[0]} style={{ display: "flex", alignItems: "center", gap: "4px", background: pal.bg, border: "1px solid " + pal.border + "60", borderRadius: "5px", padding: "3px 8px" }}>
-                <div style={{ width: "7px", height: "7px", borderRadius: "2px", background: pal.border }} />
-                <span style={{ fontSize: "10px", color: pal.text, fontWeight: "600" }}>{item[0]}</span>
-              </div>
-            );
-          })}
+          <span style={{ fontSize: "10px", color: "#475569", marginRight: "4px" }}>교구 색상:</span>
+          {(function() {
+            var firstInst = instructors[0];
+            if (!firstInst || !schedule[firstInst.id]) return null;
+            var seen = [];
+            WEEKS.forEach(function(w) {
+              var eq = schedule[firstInst.id][w];
+              if (eq && eq !== "-" && !seen.includes(eq)) seen.push(eq);
+            });
+            return seen.slice(0, 5).map(function(eq, i) {
+              var pal = PALETTE[i % 5];
+              return (
+                <div key={eq} style={{ display: "flex", alignItems: "center", gap: "4px", background: pal.bg, border: "1px solid " + pal.border + "60", borderRadius: "5px", padding: "4px 10px" }}>
+                  <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: pal.border }} />
+                  <span style={{ fontSize: "11px", color: pal.text, fontWeight: "600" }}>{eq}</span>
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
 
