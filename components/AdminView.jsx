@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { sbGet, sbPost, sbUpsert, sbDelete } from "../lib/supabaseClient";
+import { sbGet, sbPost, sbPatch, sbUpsert, sbDelete } from "../lib/supabaseClient";
 import { WEEKS, WEEK_LABELS, INITIAL_INSTRUCTORS, INIT_SCHEDULE, EQUIPMENT_LIST, BASE_QTY, getCurrentWeek } from "../lib/constants";
 import { calcWeekColors, getWeekPalette, getEqPalette, EQ_COLORS } from "../lib/colorUtils";
 
@@ -127,6 +127,9 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   const [userSearch, setUserSearch] = useState(""); // 강사 검색어
   const [selectedUserId, setSelectedUserId] = useState(""); // 선택된 유저 (user_id 문자열)
   const [showUserDropdown, setShowUserDropdown] = useState(false); // 드롭다운 표시 여부
+  const [replaceModal, setReplaceModal] = useState(null); // { instId, instName } 교체 모달
+  const [replaceSearch, setReplaceSearch] = useState(""); // 교체 검색어
+  const [replaceSelectedUser, setReplaceSelectedUser] = useState(null); // 교체할 유저
   const popupRef = useRef(null);
   const userSearchRef = useRef(null);
 
@@ -419,6 +422,44 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     showToast(name + " 삭제 완료", "warn");
   }
 
+  // 강사 교체 — rotation_schedule/handover_logs는 유지, instructors name/region만 변경
+  async function doReplaceInstructor() {
+    if (!replaceModal || !replaceSelectedUser) return;
+    var instId = replaceModal.instId;
+    var newName = replaceSelectedUser.name;
+    var newRegion = replaceSelectedUser.region || null;
+
+    try {
+      // 1. instructors 테이블 name, region 업데이트
+      await sbPatch("instructors?id=eq." + instId, {
+        name: newName,
+        region: newRegion,
+      });
+
+      // 2. 로컬 state 업데이트
+      setInstructors(function(prev) {
+        return prev.map(function(i) {
+          if (i.id !== instId) return i;
+          return Object.assign({}, i, { name: newName, region: newRegion || "" });
+        });
+      });
+      setDbInstructors(function(prev) {
+        if (!prev) return prev;
+        return prev.map(function(i) {
+          if (i.id !== instId) return i;
+          return Object.assign({}, i, { name: newName, region: newRegion || "" });
+        });
+      });
+
+      showToast(replaceModal.instName + " → " + newName + " 교체 완료!");
+      setReplaceModal(null);
+      setReplaceSearch("");
+      setReplaceSelectedUser(null);
+    } catch(e) {
+      showToast("교체 실패: " + e.message, "warn");
+    }
+  }
+
   // 셀 변경 + 아래 강사 자동 편성
   // instId: 변경한 강사, week: 변경한 주차, newVal: 새 교구값
   // 아래 강사들에게 shiftAmount 주 간격으로 순차 자동 편성
@@ -648,8 +689,14 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
                     </td>
                     <td style={{ padding: "0 8px 0 6px", position: "sticky", left: "36px", zIndex: 1, background: rowBase, borderRight: "1px solid #1E293B" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                        <div>
-                          <div style={{ fontSize: "11px", fontWeight: "600", color: isSelected ? "#A5B4FC" : "#CBD5E1", whiteSpace: "nowrap" }}>{inst.name}</div>
+                        <div
+                          onClick={function() { setReplaceModal({ instId: inst.id, instName: inst.name }); setReplaceSearch(""); setReplaceSelectedUser(null); }}
+                          title="클릭하여 강사 교체"
+                          style={{ cursor: "pointer" }}>
+                          <div style={{ fontSize: "11px", fontWeight: "600", color: isSelected ? "#A5B4FC" : "#CBD5E1", whiteSpace: "nowrap" }}>
+                            {inst.name}
+                            <span style={{ fontSize: "8px", color: "#334155", marginLeft: "4px" }}>✎</span>
+                          </div>
                           {inst.note ? <div style={{ fontSize: "9px", color: "#475569", marginTop: "2px" }}>{inst.note}</div> : null}
                         </div>
                         <button
@@ -732,33 +779,40 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
               )}
               {/* 드롭다운 목록 */}
               {showUserDropdown && userSearch.trim().length >= 1 && (function() {
-                var filtered = userList.filter(function(u) {
-                  var alreadyInstructor = instructors.some(function(i) { return String(i.user_id) === String(u.user_id) || i.name === u.name; });
+                var allMatched = userList.filter(function(u) {
                   var matchName = u.name && u.name.includes(userSearch.trim());
                   var matchAccount = u.user_account && u.user_account.includes(userSearch.trim());
-                  return !alreadyInstructor && (matchName || matchAccount);
-                }).slice(0, 10); // 최대 10개
-                if (filtered.length === 0) return (
+                  return matchName || matchAccount;
+                }).slice(0, 10);
+
+                if (allMatched.length === 0) return (
                   <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "6px", zIndex: 100, padding: "10px", fontSize: "11px", color: "#475569" }}>
                     검색 결과 없음
                   </div>
                 );
                 return (
                   <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "6px", zIndex: 100, maxHeight: "200px", overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
-                    {filtered.map(function(u) {
+                    {allMatched.map(function(u) {
+                      var alreadyAdded = instructors.some(function(i) { return i.name === u.name; });
                       return (
                         <div key={u.user_id}
                           onMouseDown={function() {
+                            if (alreadyAdded) return;
                             setSelectedUserId(String(u.user_id));
                             setUserSearch(u.name);
                             setNewName(u.name || "");
                             setShowUserDropdown(false);
                           }}
-                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #0F1117" }}
-                          onMouseEnter={function(e) { e.currentTarget.style.background = "#334155"; }}
+                          style={{ padding: "8px 12px", cursor: alreadyAdded ? "default" : "pointer", borderBottom: "1px solid #0F1117", opacity: alreadyAdded ? 0.45 : 1 }}
+                          onMouseEnter={function(e) { if (!alreadyAdded) e.currentTarget.style.background = "#334155"; }}
                           onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: "700", color: "#F1F5F9" }}>{u.name}</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#F1F5F9" }}>{u.name}</span>
+                              {alreadyAdded && (
+                                <span style={{ fontSize: "9px", background: "#1E3A2A", color: "#22C55E", border: "1px solid #22C55E44", borderRadius: "3px", padding: "1px 5px", fontWeight: "700" }}>등록됨</span>
+                              )}
+                            </div>
                             <span style={{ fontSize: "10px", color: "#64748B" }}>{u.phone || "연락처 없음"}</span>
                           </div>
                           <div style={{ fontSize: "10px", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1097,6 +1151,102 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           </div>
         );
       })()}
+
+      {/* 강사 교체 모달 */}
+      {replaceModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onMouseDown={function(e) { if (e.target === e.currentTarget) { setReplaceModal(null); setReplaceSearch(""); setReplaceSelectedUser(null); } }}>
+          <div style={{ background: "#1E293B", borderRadius: "14px", border: "1px solid #334155", padding: "24px 24px 20px", width: "360px", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+            {/* 헤더 */}
+            <div style={{ marginBottom: "16px" }}>
+              <div style={{ fontSize: "15px", fontWeight: "800", color: "#F1F5F9", marginBottom: "4px" }}>강사 교체</div>
+              <div style={{ fontSize: "11px", color: "#64748B" }}>
+                <span style={{ color: "#A5B4FC", fontWeight: "700" }}>{replaceModal.instName}</span>
+                {" "}→ 새 강사로 교체 (로테이션 일정은 유지됩니다)
+              </div>
+            </div>
+
+            {/* 검색창 */}
+            <div style={{ position: "relative", marginBottom: "12px" }}>
+              <input
+                autoFocus
+                value={replaceSearch}
+                onChange={function(e) { setReplaceSearch(e.target.value); setReplaceSelectedUser(null); }}
+                placeholder="교체할 강사명 검색..."
+                style={{ width: "100%", padding: "10px 12px", background: "#0F1117", border: "1.5px solid " + (replaceSelectedUser ? "#6366F1" : "#334155"), borderRadius: "8px", fontSize: "13px", color: "#F1F5F9", outline: "none", boxSizing: "border-box" }}
+              />
+              {replaceSelectedUser && (
+                <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", color: "#22C55E", fontSize: "13px" }}>✓</span>
+              )}
+
+              {/* 검색 드롭다운 */}
+              {replaceSearch.trim().length >= 1 && !replaceSelectedUser && (function() {
+                var matched = userList.filter(function(u) {
+                  return u.name && u.name.includes(replaceSearch.trim());
+                }).slice(0, 8);
+                if (matched.length === 0) return (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "6px", zIndex: 200, padding: "10px", fontSize: "11px", color: "#475569" }}>
+                    검색 결과 없음
+                  </div>
+                );
+                return (
+                  <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, background: "#1E293B", border: "1px solid #334155", borderRadius: "8px", zIndex: 200, maxHeight: "180px", overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+                    {matched.map(function(u) {
+                      var alreadyAdded = instructors.some(function(i) { return i.name === u.name && i.id !== replaceModal.instId; });
+                      return (
+                        <div key={u.user_id}
+                          onMouseDown={function() {
+                            if (alreadyAdded) return;
+                            setReplaceSelectedUser(u);
+                            setReplaceSearch(u.name);
+                          }}
+                          style={{ padding: "8px 12px", cursor: alreadyAdded ? "default" : "pointer", borderBottom: "1px solid #0F1117", opacity: alreadyAdded ? 0.4 : 1 }}
+                          onMouseEnter={function(e) { if (!alreadyAdded) e.currentTarget.style.background = "#334155"; }}
+                          onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span style={{ fontSize: "13px", fontWeight: "700", color: "#F1F5F9" }}>{u.name}</span>
+                              {alreadyAdded && <span style={{ fontSize: "9px", background: "#1E3A2A", color: "#22C55E", border: "1px solid #22C55E44", borderRadius: "3px", padding: "1px 5px" }}>등록됨</span>}
+                            </div>
+                            <span style={{ fontSize: "10px", color: "#64748B" }}>{u.phone || ""}</span>
+                          </div>
+                          <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.address || ""}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* 선택된 강사 미리보기 */}
+            {replaceSelectedUser && (
+              <div style={{ background: "#0F1117", borderRadius: "8px", padding: "10px 12px", marginBottom: "14px", border: "1px solid #6366F1" }}>
+                <div style={{ fontSize: "11px", color: "#64748B", marginBottom: "4px" }}>교체 대상</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ fontSize: "14px", fontWeight: "800", color: "#A5B4FC" }}>{replaceSelectedUser.name}</span>
+                  </div>
+                  <span style={{ fontSize: "10px", color: "#64748B" }}>{replaceSelectedUser.phone || ""}</span>
+                </div>
+                <div style={{ fontSize: "10px", color: "#475569", marginTop: "2px" }}>{replaceSelectedUser.address || ""}</div>
+              </div>
+            )}
+
+            {/* 버튼 */}
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button onClick={function() { setReplaceModal(null); setReplaceSearch(""); setReplaceSelectedUser(null); }}
+                style={{ padding: "8px 16px", borderRadius: "7px", border: "1px solid #334155", background: "#0F1117", color: "#94A3B8", cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>
+                취소
+              </button>
+              <button onClick={doReplaceInstructor} disabled={!replaceSelectedUser}
+                style={{ padding: "8px 18px", borderRadius: "7px", border: "none", background: replaceSelectedUser ? "linear-gradient(135deg,#6366F1,#8B5CF6)" : "#334155", color: replaceSelectedUser ? "#fff" : "#64748B", cursor: replaceSelectedUser ? "pointer" : "not-allowed", fontSize: "12px", fontWeight: "700" }}>
+                교체하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 인라인 confirm 모달 */}
       {confirmTarget && (
