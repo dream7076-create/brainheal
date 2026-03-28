@@ -29,6 +29,7 @@ export default function App() {
   const [dbInstructors, setDbInstructors] = useState(null);
   const [dbEquipment, setDbEquipment] = useState(null);
   const [dbSchedule, setDbSchedule] = useState(null);
+  const [activeSheetTitle, setActiveSheetTitle] = useState("실버체육 로테이션 2026");
 
   // Save auth to localStorage
   useEffect(function() {
@@ -297,6 +298,7 @@ export default function App() {
             setHandoverLogs={setHandoverLogs}
             setDbInstructors={setDbInstructors}
             onSaved={reloadSchedule}
+            onSheetTitleChange={setActiveSheetTitle}
           />
         : <InstructorView
             authUser={authUser}
@@ -306,6 +308,7 @@ export default function App() {
             currentInstructorId={authUser.instructorId}
             currentInstructorName={authUser.instructorName}
             dbSchedule={dbSchedule}
+            sheetTitle={activeSheetTitle}
           />}
     </div>
   );

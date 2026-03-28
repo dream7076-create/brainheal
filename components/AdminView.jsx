@@ -20,12 +20,12 @@ function eqColor(name) {
   return idx >= 0 ? EQ_COLORS[idx % EQ_COLORS.length] : "#475569";
 }
 
-function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHandoverLogs, setDbInstructors, onSaved }) {
+function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHandoverLogs, setDbInstructors, onSaved, onSheetTitleChange }) {
   // -- 시트 목록 state ----------------------------------------------
   const initInstructors = dbInstructors && dbInstructors.length > 0 ? dbInstructors : INITIAL_INSTRUCTORS;
   const initSchedule    = dbSchedule && Object.keys(dbSchedule).length > 0 ? dbSchedule : INIT_SCHEDULE;
   const [sheets, setSheets] = useState([
-    { id: "sheet1", title: "실버체육 로테이션 2026", instructors: initInstructors, schedule: initSchedule }
+    { id: "sheet1", dbSheetId: "main", title: "실버체육 로테이션 2026", instructors: initInstructors, schedule: initSchedule }
   ]);
 
   // DB 데이터가 로드되면 메인 시트 갱신
@@ -66,6 +66,12 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   const [savedAt, setSavedAt] = useState(null); // 마지막 저장 시각
   const [hasUnsaved, setHasUnsaved] = useState(false); // 미저장 변경사항 여부
 
+  // 활성 시트 변경 시 부모(App)에 시트 제목 알림
+  useEffect(function() {
+    var title = activeSheet ? activeSheet.title : "실버체육 로테이션 2026";
+    if (onSheetTitleChange) onSheetTitleChange(title);
+  }, [activeSheetId, sheets]);
+
   function showToast(msg, type) { setToast({ msg: msg, type: type || "info" }); setTimeout(function() { setToast(null); }, type === "warn" ? 4000 : 2000); }
 
   var activeSheet = sheets.find(function(s) { return s.id === activeSheetId; }) || sheets[0];
@@ -79,7 +85,8 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   function addSheet() {
     if (!newSheetTitle.trim()) return;
     var id = "sheet" + Date.now();
-    setSheets(function(prev) { return prev.concat([{ id: id, title: newSheetTitle.trim(), instructors: [], schedule: {} }]); });
+    var dbSheetId = "sheet_" + Date.now(); // DB에 저장될 고유 sheet_id
+    setSheets(function(prev) { return prev.concat([{ id: id, dbSheetId: dbSheetId, title: newSheetTitle.trim(), instructors: [], schedule: {} }]); });
     setActiveSheetId(id);
     setNewSheetTitle("");
     setShowNewSheetModal(false);
@@ -104,6 +111,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
   // -- 현재 시트 데이터 ----------------------------------------------
   var instructors = activeSheet.instructors;
   var schedule = activeSheet.schedule;
+  var activeDbSheetId = activeSheet.dbSheetId || "main"; // DB에 저장될 sheet_id
 
   function setInstructors(fn) { updateSheet(function(s) { return { instructors: typeof fn === "function" ? fn(s.instructors) : fn }; }); }
   function setSchedule(fn) { updateSheet(function(s) { return { schedule: typeof fn === "function" ? fn(s.schedule) : fn }; }); }
@@ -185,7 +193,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
           var val = (schedule[inst.id] && schedule[inst.id][w]) || "-";
           if (val !== "-") {
             inserts.push({
-              sheet_id: "main",
+              sheet_id: activeDbSheetId,
               instructor_id: inst.id,
               equipment_id: eqMap[val] || null,
               year: 2026,
@@ -197,7 +205,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
 
       // 먼저 기존 데이터 모두 삭제
       try {
-        await sbDelete("rotation_schedule?year=eq.2026&sheet_id=eq.main");
+        await sbDelete("rotation_schedule?year=eq.2026&sheet_id=eq." + activeDbSheetId);
         console.log("기존 rotation_schedule 데이터 삭제 완료");
       } catch(e) {
         console.warn("기존 데이터 삭제 중 오류:", e);
@@ -368,7 +376,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
               var val = newRow[w];
               if (val && val !== "-" && eqMap[val]) {
                 scheduleUpserts.push({
-                  sheet_id: "main",
+                  sheet_id: activeDbSheetId,
                   instructor_id: savedInstId,
                   equipment_id: eqMap[val],
                   year: 2026,
@@ -399,7 +407,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
     (async function() {
       try {
         // 1. rotation_schedule 삭제
-        await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq.main");
+        await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq." + activeDbSheetId);
         // 2. handover_logs 삭제
         await sbDelete("handover_logs?instructor_id=eq." + id);
         // 3. instructors 테이블에서 삭제
@@ -426,7 +434,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
       try {
         for (var id of ids) {
           // 1. rotation_schedule 삭제
-          await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq.main");
+          await sbDelete("rotation_schedule?instructor_id=eq." + id + "&year=eq.2026&sheet_id=eq." + activeDbSheetId);
           // 2. handover_logs 삭제
           await sbDelete("handover_logs?instructor_id=eq." + id);
           // 3. instructors 테이블에서 삭제
@@ -527,7 +535,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
             var eqId = eqMap[c.val];
             console.log("교구:", c.val, "-> ID:", eqId);
             return {
-              sheet_id: "main",
+              sheet_id: activeDbSheetId,
               instructor_id: c.instId,
               equipment_id: eqId || null,
               year: 2026,
@@ -542,7 +550,7 @@ function AdminView({ handoverLogs, dbInstructors, dbSchedule, dbEquipment, setHa
         // 먼저 변경할 셀들의 기존 데이터 삭제 (중복 키 오류 방지)
         for (var c of changes) {
           try {
-            await sbDelete("rotation_schedule?instructor_id=eq." + c.instId + "&week=eq." + c.week + "&year=eq.2026&sheet_id=eq.main");
+            await sbDelete("rotation_schedule?instructor_id=eq." + c.instId + "&week=eq." + c.week + "&year=eq.2026&sheet_id=eq." + activeDbSheetId);
           } catch(e) {
             // 삭제할 데이터가 없으면 무시
           }

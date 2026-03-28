@@ -10,7 +10,7 @@ function eqColor(name) {
   return idx >= 0 ? EQ_COLORS[idx % EQ_COLORS.length] : "#475569";
 }
 
-export default function InstructorView({ authUser, handoverLogs, setHandoverLogs, dbInstructors, currentInstructorId, currentInstructorName, dbSchedule }) {
+export default function InstructorView({ authUser, handoverLogs, setHandoverLogs, dbInstructors, currentInstructorId, currentInstructorName, dbSchedule, sheetTitle }) {
   const [activeTab, setActiveTab] = useState("schedule");
   const [scheduleMonth, setScheduleMonth] = useState(parseInt(CURRENT_WEEK.split("-")[0], 10));
   const [historyMonth, setHistoryMonth] = useState(parseInt(CURRENT_WEEK.split("-")[0], 10));
@@ -408,7 +408,7 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
         {/* 배너 */}
         <div style={{ background: "linear-gradient(135deg,#4F46E5,#7C3AED)", borderRadius: "13px", padding: "15px 16px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.5)", fontWeight: "600", marginBottom: "3px" }}>MY PAGE | 실버체육</div>
+            <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.5)", fontWeight: "600", marginBottom: "3px" }}>MY PAGE | {sheetTitle || "실버체육 로테이션 2026"}</div>
             <div style={{ fontSize: "20px", fontWeight: "900", color: "#fff" }}>{myDisplayName} 강사</div>
             <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.55)", marginTop: "2px" }}>로테이션 {myIdx + 1}번째</div>
           </div>
