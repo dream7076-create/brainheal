@@ -41,7 +41,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   const [selectedFromIdx, setSelectedFromIdx] = useState(null);
   const [newName, setNewName] = useState("");
   const [newNote, setNewNote] = useState("");
-  const [newShiftAmount, setNewShiftAmount] = useState(1);
 
   // ── 교구 팝업 state ───────────────────────────────────────────────
   const [eqPopup, setEqPopup] = useState(null);
@@ -49,7 +48,8 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [hoveredDelId, setHoveredDelId] = useState(null);
   const [eqList, setEqList] = useState(EQUIPMENT_LIST);
-  const [equipmentMap, setEquipmentMap] = useState({}); // name → id 맵 (내부 관리)
+  const [equipmentMap, setEquipmentMap] = useState({}); // name → id 맵
+  const [equipmentMapReady, setEquipmentMapReady] = useState(false); // 로드 완료 여부
   const popupRef = useRef(null);
 
   // ── 유저 검색 state ───────────────────────────────────────────────
@@ -94,20 +94,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     loadSheets();
   }, []);
 
-  // ── 교구 목록 로드 ────────────────────────────────────────────────
-  useEffect(function() {
-    sbGet("equipment?select=id,name,base_qty&is_active=eq.true&order=name.asc")
-      .then(function(data) {
-        if (Array.isArray(data) && data.length > 0) {
-          setEqList(data.map(r => r.name));
-          // name → id 맵 구성
-          var map = {};
-          data.forEach(r => { map[r.name] = r.id; });
-          setEquipmentMap(map);
-        }
-      }).catch(function() {});
-  }, []);
-
   // ── 유저 목록 로드 ────────────────────────────────────────────────
   useEffect(function() {
     sbGet("user?select=user_id,user_account,name,email,phone,address&order=name.asc")
@@ -143,13 +129,28 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
           sort_order: r.sort_order
         })) : [];
 
-        // 2. 현재 시트 스케줄 로드
+        // 2. 현재 시트 스케줄 로드 (equipment 조인 없이 equipment_id만 가져옴)
         var schedRows = await sbGet(
-          "rotation_schedule?select=instructor_id,equipment_id,week,equipment(name)" +
+          "rotation_schedule?select=instructor_id,equipment_id,week" +
           "&year=eq.2026&sheet_id=eq." + activeSheetId + "&order=week.asc"
         );
 
-        // 3. 스케줄 객체 구성
+        // 3. equipment 전체 목록 로드 (id → name 역방향 맵)
+        var eqData = await sbGet("equipment?select=id,name&is_active=eq.true");
+        var eqIdToName = {};
+        var nameToId = {};
+        if (Array.isArray(eqData)) {
+          eqData.forEach(r => {
+            eqIdToName[r.id] = r.name;
+            nameToId[r.name] = r.id;
+          });
+          // equipmentMap도 최신으로 갱신
+          setEquipmentMap(nameToId);
+          setEqList(eqData.map(r => r.name).sort());
+          setEquipmentMapReady(true);
+        }
+
+        // 4. 스케줄 객체 구성 (equipment_id → name 변환)
         var schedObj = {};
         instList.forEach(function(inst) {
           schedObj[inst.id] = {};
@@ -157,8 +158,9 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         });
         if (Array.isArray(schedRows)) {
           schedRows.forEach(function(r) {
-            if (schedObj[r.instructor_id]) {
-              schedObj[r.instructor_id][r.week] = (r.equipment && r.equipment.name) || "-";
+            if (schedObj[r.instructor_id] && r.equipment_id) {
+              var eqName = eqIdToName[r.equipment_id] || "-";
+              schedObj[r.instructor_id][r.week] = eqName;
             }
           });
         }
@@ -196,13 +198,15 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     var newId = "sheet_" + Date.now();
     try {
       var newSortOrder = sheets.length + 1;
-      await sbPost("sheets", { id: newId, title: newSheetTitle.trim(), sort_order: newSortOrder });
+      var res = await sbPost("sheets", { id: newId, title: newSheetTitle.trim(), sort_order: newSortOrder });
+      if (!res || !res[0]) throw new Error("sheets 테이블 저장 실패 - RLS 정책을 확인하세요");
       setSheets(prev => prev.concat([{ id: newId, title: newSheetTitle.trim(), sort_order: newSortOrder }]));
       setActiveSheetId(newId);
       setNewSheetTitle("");
       setShowNewSheetModal(false);
       showToast(newSheetTitle.trim() + " 시트 추가!");
     } catch(e) {
+      console.error("시트 추가 실패:", e);
       showToast("시트 추가 실패: " + e.message, "warn");
     }
   }
@@ -250,7 +254,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
 
   // ── 전체 저장 ────────────────────────────────────────────────────
   async function saveAllToDb() {
-    if (Object.keys(equipmentMap).length === 0) { showToast("교구 정보를 불러오는 중입니다", "warn"); return; }
+    if (!equipmentMapReady) { showToast("교구 정보 로드 중입니다. 잠시 후 다시 시도하세요.", "warn"); return; }
     setSaving(true);
     try {
       var inserts = [];
@@ -305,16 +309,13 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         var saved = res[0];
         var savedId = saved.id;
 
-        // 스케줄 생성:
-        // 마지막 강사 스케줄의 각 주차를 newShiftAmount만큼 뒤로 밀기
-        // → 신규 강사 wIdx주차 = 마지막 강사 (wIdx - newShiftAmount)주차 교구
-        // → 앞쪽 newShiftAmount개 주차는 "-" (공백)
+        // 스케줄 생성: 마지막 강사 스케줄을 shiftAmount만큼 뒤로 밀기
         var lastInst = instructors[instructors.length - 1];
         var newRow = {};
         WEEKS.forEach(function(week, wIdx) {
-          var srcIdx = wIdx - newShiftAmount;
+          var srcIdx = wIdx - shiftAmount;
           if (srcIdx < 0) {
-            newRow[week] = "-"; // 앞쪽은 공백
+            newRow[week] = "-";
           } else {
             newRow[week] = (lastInst && schedule[lastInst.id] && schedule[lastInst.id][WEEKS[srcIdx]]) || "-";
           }
@@ -337,7 +338,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         });
 
         // rotation_schedule DB 저장
-        if (Object.keys(equipmentMap).length > 0) {
+        if (equipmentMapReady) {
           var upserts = WEEKS
             .filter(w => newRow[w] && newRow[w] !== "-" && equipmentMap[newRow[w]])
             .map(w => ({ sheet_id: activeSheetId, instructor_id: savedId, equipment_id: equipmentMap[newRow[w]], year: 2026, week: w }));
@@ -345,8 +346,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         }
 
         setNewName(""); setNewNote(""); setSelectedUserId(""); setUserSearch("");
-        // 툴바 편성 간격도 newShiftAmount에 맞춰 동기화
-        setShiftAmount(newShiftAmount);
         showToast(saved.name + " 강사 추가 완료!");
       }
     } catch(e) {
@@ -452,15 +451,20 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
 
     // DB 저장
     (async function() {
-      if (Object.keys(equipmentMap).length === 0) return;
+      if (!equipmentMapReady) {
+        showToast("교구 정보 로드 중입니다. 잠시 후 다시 시도하세요.", "warn");
+        return;
+      }
       try {
         for (var c of changes) {
           await sbDelete("rotation_schedule?instructor_id=eq." + c.instId + "&week=eq." + c.week + "&year=eq.2026&sheet_id=eq." + activeSheetId);
         }
-        var upserts = changes.filter(c => c.val !== "-").map(c => ({
-          sheet_id: activeSheetId, instructor_id: c.instId,
-          equipment_id: equipmentMap[c.val] || null, year: 2026, week: c.week
-        }));
+        var upserts = changes
+          .filter(c => c.val !== "-" && equipmentMap[c.val]) // equipment_id 없으면 저장 안 함
+          .map(c => ({
+            sheet_id: activeSheetId, instructor_id: c.instId,
+            equipment_id: equipmentMap[c.val], year: 2026, week: c.week
+          }));
         if (upserts.length > 0) await sbPost("rotation_schedule", upserts);
       } catch(e) {
         showToast("DB 저장 실패: " + e.message, "warn");
@@ -714,11 +718,12 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
             <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="비고 (선택)" style={{ flex: 1, minWidth: "80px", padding: "7px 10px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", fontSize: "11px", color: "#E2E8F0", outline: "none" }} />
             <button onClick={addInstructor} style={{ padding: "7px 14px", background: selectedUserId ? "#6366F1" : "#334155", color: selectedUserId ? "#fff" : "#64748B", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: selectedUserId ? "pointer" : "not-allowed" }}>추가</button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#0F1117", border: "1px solid #334155", borderRadius: "6px", padding: "6px 10px" }}>
-            <span style={{ fontSize: "10px", color: "#64748B" }}>교구 간격</span>
-            <button onClick={() => setNewShiftAmount(v => Math.max(0, v-1))} style={{ width: "18px", height: "18px", background: "#1E293B", border: "none", borderRadius: "3px", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>−</button>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#F1F5F9", minWidth: "24px", textAlign: "center" }}>{newShiftAmount}주</span>
-            <button onClick={() => setNewShiftAmount(v => Math.min(8, v+1))} style={{ width: "18px", height: "18px", background: "#1E293B", border: "none", borderRadius: "3px", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>+</button>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#0F1117", border: "1px solid #6366F130", borderRadius: "6px", padding: "6px 10px" }}>
+            <span style={{ fontSize: "10px", color: "#818CF8", fontWeight: "600" }}>교구 간격</span>
+            <button onClick={() => setShiftAmount(v => Math.max(1, v-1))} style={{ width: "18px", height: "18px", background: "#1E293B", border: "none", borderRadius: "3px", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>−</button>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#A5B4FC", minWidth: "24px", textAlign: "center" }}>{shiftAmount}주</span>
+            <button onClick={() => setShiftAmount(v => Math.min(8, v+1))} style={{ width: "18px", height: "18px", background: "#1E293B", border: "none", borderRadius: "3px", color: "#94A3B8", cursor: "pointer", fontSize: "12px" }}>+</button>
+            <span style={{ fontSize: "9px", color: "#475569", marginLeft: "4px" }}>← 툴바 간격과 동일</span>
           </div>
         </div>
 
