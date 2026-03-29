@@ -431,28 +431,42 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     showToast(label + " 교구 " + (shiftDir === "forward" ? "뒤로 →" : "← 앞으로") + " " + shiftAmount + "주 이동 · DB 저장 중...");
 
     // DB 저장 (대상 강사들의 rotation_schedule 전체 재저장)
-    if (!equipmentMapReady) { setHasUnsaved(true); return; }
+    if (!equipmentMapReady) {
+      console.warn("equipmentMap 미준비 - 저장 스킵");
+      setHasUnsaved(true);
+      return;
+    }
+    console.log("shiftAll DB 저장 시작");
+    console.log("equipmentMap:", equipmentMap);
+    console.log("targets:", targets);
+    console.log("activeSheetId:", activeSheetId);
     try {
       setSaving(true);
-      // 대상 강사들 기존 데이터 삭제 후 재삽입
       for (var tid of targets) {
+        console.log("삭제 중:", tid);
         await sbDelete("rotation_schedule?instructor_id=eq." + tid + "&year=eq.2026&sheet_id=eq." + activeSheetId);
       }
       var inserts = [];
       targets.forEach(function(id) {
         WEEKS.forEach(function(w) {
           var val = newSchedule[id][w];
-          if (val && val !== "-" && equipmentMap[val]) {
-            inserts.push({
-              sheet_id: activeSheetId,
-              instructor_id: id,
-              equipment_id: equipmentMap[val],
-              year: 2026,
-              week: w
-            });
+          if (val && val !== "-") {
+            var eqId = equipmentMap[val];
+            if (!eqId) {
+              console.warn("equipmentMap에 없는 교구:", val, "/ 전체 맵 키:", Object.keys(equipmentMap));
+            } else {
+              inserts.push({
+                sheet_id: activeSheetId,
+                instructor_id: id,
+                equipment_id: eqId,
+                year: 2026,
+                week: w
+              });
+            }
           }
         });
       });
+      console.log("저장할 inserts 수:", inserts.length);
       var batchSize = 50;
       for (var i = 0; i < inserts.length; i += batchSize) {
         await sbPost("rotation_schedule", inserts.slice(i, i + batchSize));
@@ -461,6 +475,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
       setHasUnsaved(false);
       showToast(label + " 교구 이동 저장 완료 ✓");
     } catch(e) {
+      console.error("shiftAll 저장 실패:", e);
       showToast("저장 실패: " + e.message, "warn");
       setHasUnsaved(true);
     } finally {
