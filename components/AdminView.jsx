@@ -487,12 +487,22 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   function applyCellAndCascade(instId, week, newVal) {
     var instIdx = instructors.findIndex(i => i.id === instId);
     var weekIdx = WEEKS.indexOf(week);
+
+    console.log("=== applyCellAndCascade ===");
+    console.log("클릭한 강사:", instructors[instIdx]?.name, "instIdx:", instIdx);
+    console.log("클릭한 주차:", week, "weekIdx:", weekIdx);
+    console.log("shiftAmount:", shiftAmount);
+    console.log("전체 강사 수:", instructors.length);
+
     var changes = [{ instId, week, val: newVal }];
     for (var i = instIdx + 1; i < instructors.length; i++) {
       var targetWeekIdx = weekIdx + (i - instIdx) * shiftAmount;
+      console.log("→ ", instructors[i]?.name, "(i=" + i + ")", "targetWeekIdx:", targetWeekIdx, "=", WEEKS[targetWeekIdx]);
       if (targetWeekIdx >= WEEKS.length) break;
       changes.push({ instId: instructors[i].id, week: WEEKS[targetWeekIdx], val: newVal });
     }
+
+    console.log("changes:", changes.map(c => ({ inst: instructors.find(i=>i.id===c.instId)?.name, week: c.week, val: c.val })));
 
     setSchedule(function(prev) {
       var n = Object.assign({}, prev);
