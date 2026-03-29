@@ -49,6 +49,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [hoveredDelId, setHoveredDelId] = useState(null);
   const [eqList, setEqList] = useState(EQUIPMENT_LIST);
+  const [equipmentMap, setEquipmentMap] = useState({}); // name → id 맵 (내부 관리)
   const popupRef = useRef(null);
 
   // ── 유저 검색 state ───────────────────────────────────────────────
@@ -95,9 +96,15 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
 
   // ── 교구 목록 로드 ────────────────────────────────────────────────
   useEffect(function() {
-    sbGet("equipment?select=name&is_active=eq.true&order=name.asc")
+    sbGet("equipment?select=id,name,base_qty&is_active=eq.true&order=name.asc")
       .then(function(data) {
-        if (Array.isArray(data) && data.length > 0) setEqList(data.map(r => r.name));
+        if (Array.isArray(data) && data.length > 0) {
+          setEqList(data.map(r => r.name));
+          // name → id 맵 구성
+          var map = {};
+          data.forEach(r => { map[r.name] = r.id; });
+          setEquipmentMap(map);
+        }
       }).catch(function() {});
   }, []);
 
@@ -243,12 +250,9 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
 
   // ── 전체 저장 ────────────────────────────────────────────────────
   async function saveAllToDb() {
-    if (!dbEquipment) { showToast("DB 미연결 상태입니다", "warn"); return; }
+    if (Object.keys(equipmentMap).length === 0) { showToast("교구 정보를 불러오는 중입니다", "warn"); return; }
     setSaving(true);
     try {
-      var eqMap = {};
-      dbEquipment.forEach(e => { eqMap[e.name] = e.id; });
-
       var inserts = [];
       instructors.forEach(function(inst) {
         WEEKS.forEach(function(w) {
@@ -257,7 +261,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
             inserts.push({
               sheet_id: activeSheetId,
               instructor_id: inst.id,
-              equipment_id: eqMap[val] || null,
+              equipment_id: equipmentMap[val] || null,
               year: 2026,
               week: w
             });
@@ -326,12 +330,10 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         });
 
         // rotation_schedule DB 저장
-        if (dbEquipment) {
-          var eqMap = {};
-          dbEquipment.forEach(e => { eqMap[e.name] = e.id; });
+        if (Object.keys(equipmentMap).length > 0) {
           var upserts = WEEKS
-            .filter(w => newRow[w] && newRow[w] !== "-" && eqMap[newRow[w]])
-            .map(w => ({ sheet_id: activeSheetId, instructor_id: savedId, equipment_id: eqMap[newRow[w]], year: 2026, week: w }));
+            .filter(w => newRow[w] && newRow[w] !== "-" && equipmentMap[newRow[w]])
+            .map(w => ({ sheet_id: activeSheetId, instructor_id: savedId, equipment_id: equipmentMap[newRow[w]], year: 2026, week: w }));
           if (upserts.length > 0) await sbUpsert("rotation_schedule", upserts);
         }
 
@@ -441,16 +443,14 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
 
     // DB 저장
     (async function() {
-      if (!dbEquipment) return;
+      if (Object.keys(equipmentMap).length === 0) return;
       try {
-        var eqMap = {};
-        dbEquipment.forEach(e => { eqMap[e.name] = e.id; });
         for (var c of changes) {
           await sbDelete("rotation_schedule?instructor_id=eq." + c.instId + "&week=eq." + c.week + "&year=eq.2026&sheet_id=eq." + activeSheetId);
         }
         var upserts = changes.filter(c => c.val !== "-").map(c => ({
           sheet_id: activeSheetId, instructor_id: c.instId,
-          equipment_id: eqMap[c.val] || null, year: 2026, week: c.week
+          equipment_id: equipmentMap[c.val] || null, year: 2026, week: c.week
         }));
         if (upserts.length > 0) await sbPost("rotation_schedule", upserts);
       } catch(e) {
@@ -800,13 +800,14 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                           var newEqName = eqSearch.trim();
                           if (!newEqName) return;
                           try {
-                            await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                            var res = await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                            var newId = res && res[0] ? res[0].id : null;
                             setEqList(prev => prev.concat([newEqName]).sort());
+                            if (newId) setEquipmentMap(prev => Object.assign({}, prev, { [newEqName]: newId }));
                             showToast(newEqName + " 교구 추가 완료!");
                           } catch(e) {
-                            // DB 실패 시 로컬에만 추가
                             setEqList(prev => prev.concat([newEqName]).sort());
-                            showToast(newEqName + " 추가 (로컬)");
+                            showToast(newEqName + " 추가 (로컬만 반영 - DB 저장 실패)");
                           }
                         }}
                           style={{ width: "100%", padding: "12px 18px", background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
@@ -843,13 +844,15 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                   if (!newEqName) return;
                   if (eqList.includes(newEqName)) { showToast("이미 존재하는 교구입니다", "warn"); return; }
                   try {
-                    await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                    var res = await sbPost("equipment", { name: newEqName, base_qty: 50, is_active: true });
+                    var newId = res && res[0] ? res[0].id : null;
                     setEqList(prev => prev.concat([newEqName]).sort());
+                    if (newId) setEquipmentMap(prev => Object.assign({}, prev, { [newEqName]: newId }));
                     showToast(newEqName + " 교구 추가 완료!");
                     if (input) input.value = "";
                   } catch(e) {
                     setEqList(prev => prev.concat([newEqName]).sort());
-                    showToast(newEqName + " 추가 (로컬)");
+                    showToast(newEqName + " 추가 (로컬만 반영 - DB 저장 실패)");
                     if (input) input.value = "";
                   }
                 }}
