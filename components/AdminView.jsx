@@ -305,12 +305,19 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         var saved = res[0];
         var savedId = saved.id;
 
-        // 스케줄 생성 (마지막 강사 기준으로 shift)
+        // 스케줄 생성:
+        // 마지막 강사 스케줄의 각 주차를 newShiftAmount만큼 뒤로 밀기
+        // → 신규 강사 wIdx주차 = 마지막 강사 (wIdx - newShiftAmount)주차 교구
+        // → 앞쪽 newShiftAmount개 주차는 "-" (공백)
         var lastInst = instructors[instructors.length - 1];
         var newRow = {};
         WEEKS.forEach(function(week, wIdx) {
-          var srcIdx = ((wIdx - newShiftAmount) % WEEKS.length + WEEKS.length) % WEEKS.length;
-          newRow[week] = (lastInst && schedule[lastInst.id] && schedule[lastInst.id][WEEKS[srcIdx]]) || "-";
+          var srcIdx = wIdx - newShiftAmount;
+          if (srcIdx < 0) {
+            newRow[week] = "-"; // 앞쪽은 공백
+          } else {
+            newRow[week] = (lastInst && schedule[lastInst.id] && schedule[lastInst.id][WEEKS[srcIdx]]) || "-";
+          }
         });
 
         // 현재 시트에만 반영
@@ -338,6 +345,8 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         }
 
         setNewName(""); setNewNote(""); setSelectedUserId(""); setUserSearch("");
+        // 툴바 편성 간격도 newShiftAmount에 맞춰 동기화
+        setShiftAmount(newShiftAmount);
         showToast(saved.name + " 강사 추가 완료!");
       }
     } catch(e) {
