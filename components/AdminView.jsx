@@ -407,26 +407,65 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   }
 
   // ── 전체 이동 (shiftAll) ─────────────────────────────────────────
-  function shiftAll() {
+  async function shiftAll() {
     var n = shiftDir === "forward" ? shiftAmount : -shiftAmount;
     var targets = selectedFromIdx !== null
       ? instructors.slice(selectedFromIdx).map(i => i.id)
       : instructors.map(i => i.id);
 
-    setSchedule(function(prev) {
-      var next = Object.assign({}, prev);
+    // 새 스케줄 계산
+    var newSchedule = Object.assign({}, schedule);
+    targets.forEach(function(id) {
+      newSchedule[id] = {};
+      WEEKS.forEach(function(week, wIdx) {
+        var srcIdx = ((wIdx - n) % WEEKS.length + WEEKS.length) % WEEKS.length;
+        newSchedule[id][week] = (schedule[id] && schedule[id][WEEKS[srcIdx]]) || "-";
+      });
+    });
+
+    setSchedule(newSchedule);
+
+    var label = selectedFromIdx !== null
+      ? (instructors[selectedFromIdx].name + " 이하 " + targets.length + "명")
+      : "전체";
+    showToast(label + " 교구 " + (shiftDir === "forward" ? "뒤로 →" : "← 앞으로") + " " + shiftAmount + "주 이동 · DB 저장 중...");
+
+    // DB 저장 (대상 강사들의 rotation_schedule 전체 재저장)
+    if (!equipmentMapReady) { setHasUnsaved(true); return; }
+    try {
+      setSaving(true);
+      // 대상 강사들 기존 데이터 삭제 후 재삽입
+      for (var tid of targets) {
+        await sbDelete("rotation_schedule?instructor_id=eq." + tid + "&year=eq.2026&sheet_id=eq." + activeSheetId);
+      }
+      var inserts = [];
       targets.forEach(function(id) {
-        next[id] = {};
-        WEEKS.forEach(function(week, wIdx) {
-          var srcIdx = ((wIdx - n) % WEEKS.length + WEEKS.length) % WEEKS.length;
-          next[id][week] = (prev[id] && prev[id][WEEKS[srcIdx]]) || "-";
+        WEEKS.forEach(function(w) {
+          var val = newSchedule[id][w];
+          if (val && val !== "-" && equipmentMap[val]) {
+            inserts.push({
+              sheet_id: activeSheetId,
+              instructor_id: id,
+              equipment_id: equipmentMap[val],
+              year: 2026,
+              week: w
+            });
+          }
         });
       });
-      return next;
-    });
-    var label = selectedFromIdx !== null ? (instructors[selectedFromIdx].name + " 이하 " + targets.length + "명") : "전체";
-    showToast(label + " 교구 " + (shiftDir === "forward" ? "뒤로 →" : "← 앞으로") + " " + shiftAmount + "주 이동 완료");
-    setHasUnsaved(true);
+      var batchSize = 50;
+      for (var i = 0; i < inserts.length; i += batchSize) {
+        await sbPost("rotation_schedule", inserts.slice(i, i + batchSize));
+      }
+      setSavedAt(new Date());
+      setHasUnsaved(false);
+      showToast(label + " 교구 이동 저장 완료 ✓");
+    } catch(e) {
+      showToast("저장 실패: " + e.message, "warn");
+      setHasUnsaved(true);
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ── 셀 변경 + Cascade ────────────────────────────────────────────
