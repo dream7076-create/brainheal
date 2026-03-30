@@ -413,14 +413,23 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
       ? instructors.slice(selectedFromIdx).map(i => i.id)
       : instructors.map(i => i.id);
 
-    // 새 스케줄 계산
-    var newSchedule = Object.assign({}, schedule);
+    // 새 스케줄 계산 - 깊은 복사 + wrap-around 없이 범위 밖은 "-"
+    var newSchedule = {};
+    instructors.forEach(function(inst) {
+      newSchedule[inst.id] = Object.assign({}, schedule[inst.id] || {});
+    });
     targets.forEach(function(id) {
-      newSchedule[id] = {};
+      var oldRow = schedule[id] || {};
+      var newRow = {};
       WEEKS.forEach(function(week, wIdx) {
-        var srcIdx = ((wIdx - n) % WEEKS.length + WEEKS.length) % WEEKS.length;
-        newSchedule[id][week] = (schedule[id] && schedule[id][WEEKS[srcIdx]]) || "-";
+        var srcIdx = wIdx - n; // forward=뒤로 밀기 → srcIdx < 0 이면 공백
+        if (srcIdx < 0 || srcIdx >= WEEKS.length) {
+          newRow[week] = "-";
+        } else {
+          newRow[week] = oldRow[WEEKS[srcIdx]] || "-";
+        }
       });
+      newSchedule[id] = newRow;
     });
 
     setSchedule(newSchedule);
@@ -430,11 +439,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
       : "전체";
     showToast(label + " 교구 " + (shiftDir === "forward" ? "뒤로 →" : "← 앞으로") + " " + shiftAmount + "주 이동 · DB 저장 중...");
 
-    // DB 저장
-    if (!equipmentMapReady) {
-      setHasUnsaved(true);
-      return;
-    }
+    if (!equipmentMapReady) { setHasUnsaved(true); return; }
     try {
       setSaving(true);
       for (var tid of targets) {
@@ -580,9 +585,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         }
       });
     }
-    // 디버그: 콘솔에 맵 출력
-    console.log("eqColorMap:", map);
-    console.log("1번 강사 스케줄 샘플:", firstInst && schedule[firstInst.id] ? Object.entries(schedule[firstInst.id]).filter(([w,v]) => v && v !== "-").slice(0, 10) : "없음");
     return map;
   })();
 
