@@ -564,8 +564,8 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   }
 
   // ── 색상 계산 ─────────────────────────────────────────────────────
-  // 1번 강사 스케줄 등장 순서대로 교구명에 색상 인덱스 고정
-  // 같은 교구명은 어느 강사/주차든 항상 동일 색상
+  // 1번 강사 스케줄에서 교구 등장 순서대로 색상 인덱스 고정
+  // 같은 교구명 = 항상 동일 색상 (모든 강사/주차)
   var eqColorMap = (function() {
     var map = {};
     var ci = 0;
@@ -573,20 +573,24 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     if (firstInst && schedule[firstInst.id]) {
       WEEKS.forEach(function(w) {
         var eq = schedule[firstInst.id][w];
-        if (eq && eq !== "-" && map[eq] === undefined) {
+        // 실제로 값이 있고 처음 등장하는 교구만 색상 부여
+        if (eq && eq !== "-" && eq.trim() !== "" && map[eq] === undefined) {
           map[eq] = ci % 5;
           ci++;
         }
       });
     }
+    // 디버그: 콘솔에 맵 출력
+    console.log("eqColorMap:", map);
+    console.log("1번 강사 스케줄 샘플:", firstInst && schedule[firstInst.id] ? Object.entries(schedule[firstInst.id]).filter(([w,v]) => v && v !== "-").slice(0, 10) : "없음");
     return map;
   })();
 
   function getEqPal(eqName) {
-    if (!eqName || eqName === "-") return null;
+    if (!eqName || eqName === "-" || eqName.trim() === "") return null;
     var idx = eqColorMap[eqName];
-    // 1번 강사 스케줄에 없는 교구(신규)는 현재 등록된 교구 수 기준으로 색상 부여
     if (idx === undefined) {
+      // 1번 강사에 없는 교구는 등록된 교구 수 기준으로 색상 자동 배정
       idx = Object.keys(eqColorMap).length % 5;
     }
     return PALETTE[idx];
