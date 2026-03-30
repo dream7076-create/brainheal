@@ -506,17 +506,28 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   function applyCellAndCascade(instId, week, newVal) {
     var instIdx = instructors.findIndex(i => i.id === instId);
     var weekIdx = WEEKS.indexOf(week);
+
+    // 삭제할 때는 해당 위치의 현재 교구명을 기억
+    var deletingEq = (newVal === "-") ? (schedule[instId] && schedule[instId][week]) : null;
+
     var changes = [{ instId, week, val: newVal }];
 
-    // 1번(편성한 강사) 기준으로 각 하위 강사까지의 누적 gap 계산
     var cumulativeGap = 0;
     for (var i = instIdx + 1; i < instructors.length; i++) {
-      // i-1번과 i번 사이의 실제 간격
       var gap = getInstGap(i - 1, i);
       cumulativeGap += gap;
       var targetWeekIdx = weekIdx + cumulativeGap;
       if (targetWeekIdx >= WEEKS.length) break;
-      changes.push({ instId: instructors[i].id, week: WEEKS[targetWeekIdx], val: newVal });
+      var targetWeek = WEEKS[targetWeekIdx];
+      var targetInst = instructors[i];
+
+      // 삭제 시: 해당 위치에 같은 교구가 있을 때만 삭제
+      if (deletingEq) {
+        var currentVal = schedule[targetInst.id] && schedule[targetInst.id][targetWeek];
+        if (currentVal !== deletingEq) continue; // 다른 교구면 건너뜀
+      }
+
+      changes.push({ instId: targetInst.id, week: targetWeek, val: newVal });
     }
 
     setSchedule(function(prev) {
