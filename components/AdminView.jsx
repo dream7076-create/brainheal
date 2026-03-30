@@ -563,26 +563,33 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
     setHasUnsaved(true);
   }
 
-  // ── 색상 계산 ────────────────────────────────────────────────────
-  var firstInstWeekPalMap = (function() {
+  // ── 색상 계산 ─────────────────────────────────────────────────────
+  // 1번 강사 스케줄 등장 순서대로 교구명에 색상 인덱스 고정
+  // 같은 교구명은 어느 강사/주차든 항상 동일 색상
+  var eqColorMap = (function() {
     var map = {};
     var ci = 0;
     var firstInst = instructors[0];
     if (firstInst && schedule[firstInst.id]) {
       WEEKS.forEach(function(w) {
         var eq = schedule[firstInst.id][w];
-        map[w] = (eq && eq !== "-") ? (ci++ % 5) : -1;
+        if (eq && eq !== "-" && map[eq] === undefined) {
+          map[eq] = ci % 5;
+          ci++;
+        }
       });
     }
     return map;
   })();
 
-  function getInstColPal(week, rowIdx) {
-    var weekIdx = WEEKS.indexOf(week);
-    var srcWeekIdx = weekIdx - rowIdx * shiftAmount;
-    var wrapped = ((srcWeekIdx % WEEKS.length) + WEEKS.length) % WEEKS.length;
-    var idx = firstInstWeekPalMap[WEEKS[wrapped]];
-    return (idx === undefined || idx < 0) ? null : PALETTE[idx];
+  function getEqPal(eqName) {
+    if (!eqName || eqName === "-") return null;
+    var idx = eqColorMap[eqName];
+    // 1번 강사 스케줄에 없는 교구(신규)는 현재 등록된 교구 수 기준으로 색상 부여
+    if (idx === undefined) {
+      idx = Object.keys(eqColorMap).length % 5;
+    }
+    return PALETTE[idx];
   }
 
   var selectedIds = selectedFromIdx !== null
@@ -687,7 +694,10 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                   </th>
                   {WEEKS.map(function(w) {
                     var isCur = w === CURRENT_WEEK;
-                    var pal = getInstColPal(w, 0);
+                    // 헤더 색상 = 1번 강사 해당 주차 교구명 기준
+                    var firstInst = instructors[0];
+                    var firstEq = firstInst && schedule[firstInst.id] ? schedule[firstInst.id][w] : null;
+                    var pal = getEqPal(firstEq);
                     return (
                       <th key={w} style={{ padding: "8px 5px", fontSize: "11px", textAlign: "center", whiteSpace: "nowrap", minWidth: "80px", fontWeight: "700", background: isCur ? "#1E2A4A" : (pal ? pal.bg : "#161B27"), color: isCur ? "#818CF8" : (pal ? pal.text : "#475569"), borderBottom: "2px solid " + (isCur ? "#6366F1" : (pal ? pal.border : "#1E293B")), borderLeft: "1px solid " + (pal ? pal.border + "40" : "#1E293B"), outline: isCur ? "2px solid #6366F1" : "none", outlineOffset: "-2px" }}>
                         {WEEK_LABELS[w]}
@@ -734,7 +744,7 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
                       {WEEKS.map(function(w) {
                         var val = (schedule[inst.id] && schedule[inst.id][w]) || "-";
                         var isCur = w === CURRENT_WEEK;
-                        var pal = val !== "-" ? getInstColPal(w, rowIdx) : null;
+                        var pal = val !== "-" ? getEqPal(val) : null;
                         var isPopupOpen = eqPopup && eqPopup.instId === inst.id && eqPopup.week === w;
                         var log = val !== "-" ? handoverLogs && handoverLogs.find(l => l.instId === inst.id && l.week === w) : null;
                         var qtyBadge = null;
