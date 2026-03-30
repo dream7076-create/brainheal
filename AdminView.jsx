@@ -473,38 +473,61 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   // ── 셀 변경 + Cascade ────────────────────────────────────────────
   // 각 강사 간 실제 간격을 스케줄에서 역산해서 cascade
   function getInstGap(instAIdx, instBIdx) {
-    // instA 기준으로 instB가 몇 주 뒤에 시작하는지 계산
     var instA = instructors[instAIdx];
     var instB = instructors[instBIdx];
     if (!instA || !instB) return shiftAmount;
 
-    // 각 강사의 첫 번째 교구 배정 주차 찾기
-    var firstWeekA = WEEKS.find(w => schedule[instA.id] && schedule[instA.id][w] && schedule[instA.id][w] !== "-");
-    var firstWeekB = WEEKS.find(w => schedule[instB.id] && schedule[instB.id][w] && schedule[instB.id][w] !== "-");
+    var schedA = schedule[instA.id] || {};
+    var schedB = schedule[instB.id] || {};
 
-    if (!firstWeekA || !firstWeekB) return shiftAmount; // 데이터 없으면 툴바값 사용
+    // 두 강사 사이의 최소 양수 gap 찾기 (공통 교구 중 인접한 것)
+    var minGap = null;
+    WEEKS.forEach(function(wA, idxA) {
+      var eq = schedA[wA];
+      if (!eq || eq === "-") return;
+      // instB에서 같은 교구 찾기
+      var idxB = WEEKS.findIndex(function(wB) { return schedB[wB] === eq; });
+      if (idxB > idxA) {
+        var g = idxB - idxA;
+        if (minGap === null || g < minGap) minGap = g;
+      }
+    });
 
-    var idxA = WEEKS.indexOf(firstWeekA);
-    var idxB = WEEKS.indexOf(firstWeekB);
-    var gap = idxB - idxA;
+    if (minGap !== null) return minGap;
 
-    return gap > 0 ? gap : shiftAmount; // 음수거나 0이면 툴바값 사용
+    // 공통 교구 없으면 첫 교구 주차 차이
+    var firstIdxA = WEEKS.findIndex(function(w) { return schedA[w] && schedA[w] !== "-"; });
+    var firstIdxB = WEEKS.findIndex(function(w) { return schedB[w] && schedB[w] !== "-"; });
+    if (firstIdxA >= 0 && firstIdxB > firstIdxA) return firstIdxB - firstIdxA;
+
+    return shiftAmount;
   }
 
   function applyCellAndCascade(instId, week, newVal) {
     var instIdx = instructors.findIndex(i => i.id === instId);
     var weekIdx = WEEKS.indexOf(week);
+
+    // 삭제할 때는 해당 위치의 현재 교구명을 기억
+    var deletingEq = (newVal === "-") ? (schedule[instId] && schedule[instId][week]) : null;
+
     var changes = [{ instId, week, val: newVal }];
 
-    // 각 하위 강사에 대해 실제 간격을 역산해서 cascade
     var cumulativeGap = 0;
     for (var i = instIdx + 1; i < instructors.length; i++) {
-      // i번째 강사와 i-1번째 강사 간의 실제 간격
       var gap = getInstGap(i - 1, i);
       cumulativeGap += gap;
       var targetWeekIdx = weekIdx + cumulativeGap;
       if (targetWeekIdx >= WEEKS.length) break;
-      changes.push({ instId: instructors[i].id, week: WEEKS[targetWeekIdx], val: newVal });
+      var targetWeek = WEEKS[targetWeekIdx];
+      var targetInst = instructors[i];
+
+      // 삭제 시: 해당 위치에 같은 교구가 있을 때만 삭제
+      if (deletingEq) {
+        var currentVal = schedule[targetInst.id] && schedule[targetInst.id][targetWeek];
+        if (currentVal !== deletingEq) continue; // 다른 교구면 건너뜀
+      }
+
+      changes.push({ instId: targetInst.id, week: targetWeek, val: newVal });
     }
 
     setSchedule(function(prev) {
