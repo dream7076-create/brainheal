@@ -430,43 +430,31 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
       : "전체";
     showToast(label + " 교구 " + (shiftDir === "forward" ? "뒤로 →" : "← 앞으로") + " " + shiftAmount + "주 이동 · DB 저장 중...");
 
-    // DB 저장 (대상 강사들의 rotation_schedule 전체 재저장)
+    // DB 저장
     if (!equipmentMapReady) {
-      console.warn("equipmentMap 미준비 - 저장 스킵");
       setHasUnsaved(true);
       return;
     }
-    console.log("shiftAll DB 저장 시작");
-    console.log("equipmentMap:", equipmentMap);
-    console.log("targets:", targets);
-    console.log("activeSheetId:", activeSheetId);
     try {
       setSaving(true);
       for (var tid of targets) {
-        console.log("삭제 중:", tid);
         await sbDelete("rotation_schedule?instructor_id=eq." + tid + "&year=eq.2026&sheet_id=eq." + activeSheetId);
       }
       var inserts = [];
       targets.forEach(function(id) {
         WEEKS.forEach(function(w) {
           var val = newSchedule[id][w];
-          if (val && val !== "-") {
-            var eqId = equipmentMap[val];
-            if (!eqId) {
-              console.warn("equipmentMap에 없는 교구:", val, "/ 전체 맵 키:", Object.keys(equipmentMap));
-            } else {
-              inserts.push({
-                sheet_id: activeSheetId,
-                instructor_id: id,
-                equipment_id: eqId,
-                year: 2026,
-                week: w
-              });
-            }
+          if (val && val !== "-" && equipmentMap[val]) {
+            inserts.push({
+              sheet_id: activeSheetId,
+              instructor_id: id,
+              equipment_id: equipmentMap[val],
+              year: 2026,
+              week: w
+            });
           }
         });
       });
-      console.log("저장할 inserts 수:", inserts.length);
       var batchSize = 50;
       for (var i = 0; i < inserts.length; i += batchSize) {
         await sbPost("rotation_schedule", inserts.slice(i, i + batchSize));
@@ -475,7 +463,6 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
       setHasUnsaved(false);
       showToast(label + " 교구 이동 저장 완료 ✓");
     } catch(e) {
-      console.error("shiftAll 저장 실패:", e);
       showToast("저장 실패: " + e.message, "warn");
       setHasUnsaved(true);
     } finally {
@@ -484,25 +471,41 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
   }
 
   // ── 셀 변경 + Cascade ────────────────────────────────────────────
+  // 각 강사 간 실제 간격을 스케줄에서 역산해서 cascade
+  function getInstGap(instAIdx, instBIdx) {
+    // instA 기준으로 instB가 몇 주 뒤에 시작하는지 계산
+    var instA = instructors[instAIdx];
+    var instB = instructors[instBIdx];
+    if (!instA || !instB) return shiftAmount;
+
+    // 각 강사의 첫 번째 교구 배정 주차 찾기
+    var firstWeekA = WEEKS.find(w => schedule[instA.id] && schedule[instA.id][w] && schedule[instA.id][w] !== "-");
+    var firstWeekB = WEEKS.find(w => schedule[instB.id] && schedule[instB.id][w] && schedule[instB.id][w] !== "-");
+
+    if (!firstWeekA || !firstWeekB) return shiftAmount; // 데이터 없으면 툴바값 사용
+
+    var idxA = WEEKS.indexOf(firstWeekA);
+    var idxB = WEEKS.indexOf(firstWeekB);
+    var gap = idxB - idxA;
+
+    return gap > 0 ? gap : shiftAmount; // 음수거나 0이면 툴바값 사용
+  }
+
   function applyCellAndCascade(instId, week, newVal) {
     var instIdx = instructors.findIndex(i => i.id === instId);
     var weekIdx = WEEKS.indexOf(week);
-
-    console.log("=== applyCellAndCascade ===");
-    console.log("클릭한 강사:", instructors[instIdx]?.name, "instIdx:", instIdx);
-    console.log("클릭한 주차:", week, "weekIdx:", weekIdx);
-    console.log("shiftAmount:", shiftAmount);
-    console.log("전체 강사 수:", instructors.length);
-
     var changes = [{ instId, week, val: newVal }];
+
+    // 각 하위 강사에 대해 실제 간격을 역산해서 cascade
+    var cumulativeGap = 0;
     for (var i = instIdx + 1; i < instructors.length; i++) {
-      var targetWeekIdx = weekIdx + (i - instIdx) * shiftAmount;
-      console.log("→ ", instructors[i]?.name, "(i=" + i + ")", "targetWeekIdx:", targetWeekIdx, "=", WEEKS[targetWeekIdx]);
+      // i번째 강사와 i-1번째 강사 간의 실제 간격
+      var gap = getInstGap(i - 1, i);
+      cumulativeGap += gap;
+      var targetWeekIdx = weekIdx + cumulativeGap;
       if (targetWeekIdx >= WEEKS.length) break;
       changes.push({ instId: instructors[i].id, week: WEEKS[targetWeekIdx], val: newVal });
     }
-
-    console.log("changes:", changes.map(c => ({ inst: instructors.find(i=>i.id===c.instId)?.name, week: c.week, val: c.val })));
 
     setSchedule(function(prev) {
       var n = Object.assign({}, prev);
