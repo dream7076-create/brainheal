@@ -743,7 +743,7 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
             <div style={{ padding: "7px 13px", background: "#F8FAFC", borderTop: "1px solid #F1F5F9" }}>
               <span style={{ fontSize: "9px", color: "#94A3B8" }}>일정은 관리자가 설정합니다. 수정 필요시 관리자에게 문의하세요.</span>
             </div>
-            </div> {/* !loadingSheet */}
+            </div>
           </div>
         )}
 
