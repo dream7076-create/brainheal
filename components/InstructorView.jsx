@@ -18,12 +18,13 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
   const [handoverWeekOffset, setHandoverWeekOffset] = useState(0);
 
   // ── 시트 멀티 선택 state ─────────────────────────────────────────
-  const [sheets, setSheets] = useState([]);           // 전체 시트 목록
-  const [activeSheetId, setActiveSheetId] = useState(null); // 현재 보는 시트
-  const [sheetSchedule, setSheetSchedule] = useState({}); // 현재 시트 스케줄
-  const [sheetInstructors, setSheetInstructors] = useState([]); // 현재 시트 강사 목록
+  const [sheets, setSheets] = useState([]);
+  const [activeSheetId, setActiveSheetId] = useState(null);
+  const [sheetSchedule, setSheetSchedule] = useState({});
+  const [sheetInstructors, setSheetInstructors] = useState([]);
   const [loadingSheet, setLoadingSheet] = useState(false);
-  const [mySheetIds, setMySheetIds] = useState([]); // 내가 속한 시트 ID 목록
+  const [mySheetIds, setMySheetIds] = useState([]);
+  const [myIdInSheet, setMyIdInSheet] = useState(null); // 현재 시트에서 내 강사 UUID
 
   // 인계 폼 상태
   const [handoverReceivedQty, setHandoverReceivedQty] = useState("");
@@ -172,7 +173,14 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
 
         console.log("시트:", activeSheetId, "/ 내 이름:", myRealName, "/ 매칭:", myInstInSheet ? myInstInSheet.id : "없음");
 
-        if (!myInstInSheet) { setLoadingSheet(false); return; }
+        if (!myInstInSheet) {
+          setMyIdInSheet(null);
+          setLoadingSheet(false);
+          return;
+        }
+
+        // myIdInSheet state 설정
+        setMyIdInSheet(myInstInSheet.id);
 
         // 4. 해당 시트 rotation_schedule 로드
         var schedRows = await sbGet(
@@ -210,12 +218,20 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
   }, [activeSheetId, myId]);
 
   // 현재 시트에서 내 강사 ID (시트마다 다른 UUID일 수 있음)
-  var myInstInCurrentSheet = sheetInstructors.find(function(i) {
-    return i.id === myId || i.name === (currentInstructorName || "");
-  });
-  var myIdInSheet = myInstInCurrentSheet ? myInstInCurrentSheet.id : myId;
+  var instList = sheetInstructors.length > 0 ? sheetInstructors : ((dbInstructors && dbInstructors.length > 0) ? dbInstructors : INITIAL_INSTRUCTORS);
+  var myDisplayName = currentInstructorName || "강사";
+  var effectiveMyId = myIdInSheet || myId; // 현재 시트의 내 UUID (없으면 기본 myId)
+  var myIdx = instList.findIndex(function(i) { return i.id === effectiveMyId; });
+  var prevInst = myIdx > 0 ? instList[myIdx - 1] : null;
+  var nextInst = myIdx < instList.length - 1 ? instList[myIdx + 1] : null;
+  var isLastInst = myIdx === instList.length - 1 && instList.length > 0;
+  var nextInstName = isLastInst ? "본사" : (nextInst ? nextInst.name : "-");
+  var activeSchedule = Object.keys(sheetSchedule).length > 0 ? sheetSchedule : (dbSchedule || {});
+  var myData = (activeSchedule && effectiveMyId && activeSchedule[effectiveMyId]) ? activeSchedule[effectiveMyId] : {};
+
+  // 인계 이력 로드
   useEffect(function() {
-    if (!dbSchedule || !myId) return;
+    if (!myId) return;
     async function loadHandoverHistory() {
       try {
         var logs = await sbGet("handover_logs?instructor_id=eq." + myId + "&year=eq.2026&order=week.asc&limit=5000&select=id,instructor_id,equipment_id,week,sent_qty,received_qty,transfer_method,diff_type,diff_qty,diff_note,equipment(name)");
@@ -245,16 +261,6 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     loadLostItems();
   }, [dbSchedule, myId]);
 
-  var instList = sheetInstructors.length > 0 ? sheetInstructors : ((dbInstructors && dbInstructors.length > 0) ? dbInstructors : INITIAL_INSTRUCTORS);
-  var myDisplayName = currentInstructorName || "강사";
-  var myIdx = instList.findIndex(function(i) { return i.id === myIdInSheet; });
-  var prevInst = myIdx > 0 ? instList[myIdx - 1] : null;
-  var nextInst = myIdx < instList.length - 1 ? instList[myIdx + 1] : null;
-  var isLastInst = myIdx === instList.length - 1 && instList.length > 0;
-  var nextInstName = isLastInst ? "본사" : (nextInst ? nextInst.name : "-");
-  // 현재 시트 스케줄 우선, fallback으로 prop의 dbSchedule
-  var activeSchedule = Object.keys(sheetSchedule).length > 0 ? sheetSchedule : (dbSchedule || {});
-  var myData = (activeSchedule && myIdInSheet && activeSchedule[myIdInSheet]) ? activeSchedule[myIdInSheet] : {};
   var currentWkIdx = WEEKS.indexOf(CURRENT_WEEK);
 
   var mySchedule = WEEKS.map(function(w, idx) {
