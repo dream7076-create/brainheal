@@ -107,50 +107,43 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
       try {
         // 1. 전체 시트 목록
         var allSheets = await sbGet("sheets?select=id,title,sort_order&order=sort_order.asc");
-        if (!Array.isArray(allSheets)) return;
+        if (!Array.isArray(allSheets) || allSheets.length === 0) return;
 
-        // 2. 내가 속한 시트 찾기 (instructors 테이블에서 user 기반으로 조회)
-        var myInsts = await sbGet("instructors?select=id,sheet_id&is_active=eq.true&name=eq." + encodeURIComponent(currentInstructorName || ""));
-        // user_account 기반으로도 조회
-        var userId = authUser && authUser.userId;
-        if (userId) {
-          var myInstsById = await sbGet("instructors?select=id,sheet_id&is_active=eq.true");
-          // 전체 조회 후 내 이름으로 필터 (name 필드 활용)
-          if (Array.isArray(myInstsById)) {
-            myInsts = myInstsById.filter(function(i) {
-              return i.id === myId || (myInsts && myInsts.some && myInsts.some(function(m) { return m.id === i.id; }));
-            });
-          }
-        }
+        // 2. myId로 내 실제 이름 조회
+        var myInstRow = await sbGet("instructors?select=id,name,sheet_id&id=eq." + myId + "&is_active=eq.true");
+        var myRealName = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0].name : (currentInstructorName || "");
 
-        // 3. 내 instructor id들의 sheet_id 수집
-        // myId가 속한 시트 + 같은 이름의 강사가 속한 시트
-        var myInstRows = await sbGet("instructors?select=id,sheet_id,name&is_active=eq.true");
-        var myName = currentInstructorName || "";
+        // 3. 전체 강사 목록에서 같은 이름인 모든 행의 sheet_id 수집
+        var allInsts = await sbGet("instructors?select=id,name,sheet_id&is_active=eq.true");
         var relevantSheetIds = [];
-        if (Array.isArray(myInstRows)) {
-          myInstRows.forEach(function(inst) {
-            if (inst.id === myId || (myName && inst.name === myName)) {
-              if (inst.sheet_id && !relevantSheetIds.includes(inst.sheet_id)) {
-                relevantSheetIds.push(inst.sheet_id);
-              }
+        if (Array.isArray(allInsts)) {
+          allInsts.forEach(function(inst) {
+            if (inst.name === myRealName && inst.sheet_id && !relevantSheetIds.includes(inst.sheet_id)) {
+              relevantSheetIds.push(inst.sheet_id);
             }
           });
         }
+        // myId 자신의 sheet_id도 추가
+        if (Array.isArray(myInstRow) && myInstRow[0] && myInstRow[0].sheet_id) {
+          if (!relevantSheetIds.includes(myInstRow[0].sheet_id)) {
+            relevantSheetIds.push(myInstRow[0].sheet_id);
+          }
+        }
+
+        console.log("내 이름:", myRealName, "/ 속한 시트:", relevantSheetIds);
 
         var mySheets = allSheets.filter(function(s) { return relevantSheetIds.includes(s.id); });
-        // 내가 속한 시트가 없으면 전체 시트 보여주기
-        if (mySheets.length === 0) mySheets = allSheets;
+        if (mySheets.length === 0) mySheets = allSheets.slice(0, 1); // 없으면 첫 시트만
 
         setSheets(mySheets);
         setMySheetIds(relevantSheetIds);
-        setActiveSheetId(mySheets[0] ? mySheets[0].id : null);
+        setActiveSheetId(mySheets[0].id);
       } catch(e) {
         console.warn("시트 목록 로드 실패:", e);
       }
     }
     loadMySheets();
-  }, [myId, currentInstructorName]);
+  }, [myId]);
 
   // ── 시트 변경 시 해당 시트의 스케줄 로드 ─────────────────────────
   useEffect(function() {
@@ -158,35 +151,41 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     async function loadSheetSchedule() {
       setLoadingSheet(true);
       try {
-        // 현재 시트에서 내 강사 ID 찾기 (같은 이름의 강사)
+        // 1. 현재 시트의 전체 강사 목록
         var instRows = await sbGet(
           "instructors?select=id,name,sort_order&sheet_id=eq." + activeSheetId +
           "&is_active=eq.true&order=sort_order.asc"
         );
-        if (!Array.isArray(instRows)) { setLoadingSheet(false); return; }
-
+        if (!Array.isArray(instRows) || instRows.length === 0) {
+          setLoadingSheet(false); return;
+        }
         setSheetInstructors(instRows);
 
-        // 내 이름과 일치하는 강사 ID 찾기 (시트마다 다른 UUID)
-        var myName = currentInstructorName || "";
+        // 2. myId로 내 실제 이름 조회 (시트에 관계없이)
+        var myInstRow = await sbGet("instructors?select=name&id=eq." + myId + "&is_active=eq.true");
+        var myRealName = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0].name : "";
+
+        // 3. 현재 시트에서 내 이름과 일치하는 강사 찾기
         var myInstInSheet = instRows.find(function(i) {
-          return i.id === myId || i.name === myName;
+          return i.id === myId || (myRealName && i.name === myRealName);
         });
+
+        console.log("시트:", activeSheetId, "/ 내 이름:", myRealName, "/ 매칭:", myInstInSheet ? myInstInSheet.id : "없음");
 
         if (!myInstInSheet) { setLoadingSheet(false); return; }
 
-        // 해당 시트의 rotation_schedule 로드
+        // 4. 해당 시트 rotation_schedule 로드
         var schedRows = await sbGet(
           "rotation_schedule?select=instructor_id,equipment_id,week" +
           "&year=eq.2026&sheet_id=eq." + activeSheetId + "&order=week.asc"
         );
 
-        // equipment id → name 맵
+        // 5. equipment id → name 맵
         var eqData = await sbGet("equipment?select=id,name&is_active=eq.true");
         var eqIdToName = {};
         if (Array.isArray(eqData)) eqData.forEach(function(e) { eqIdToName[e.id] = e.name; });
 
-        // 스케줄 객체 구성
+        // 6. 스케줄 객체 구성
         var schedObj = {};
         instRows.forEach(function(inst) {
           schedObj[inst.id] = {};
@@ -210,9 +209,9 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     loadSheetSchedule();
   }, [activeSheetId, myId]);
 
-  // 현재 시트에서 내 강사 ID (시트마다 다를 수 있음)
+  // 현재 시트에서 내 강사 ID (시트마다 다른 UUID일 수 있음)
   var myInstInCurrentSheet = sheetInstructors.find(function(i) {
-    return i.id === myId || i.name === currentInstructorName;
+    return i.id === myId || i.name === (currentInstructorName || "");
   });
   var myIdInSheet = myInstInCurrentSheet ? myInstInCurrentSheet.id : myId;
   useEffect(function() {
