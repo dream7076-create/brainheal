@@ -1158,7 +1158,8 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
             </div>
           </div>
         )}
-      </div>
-    </div>
+</div>
+  </div>
+</div>
   );
 }
