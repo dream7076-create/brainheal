@@ -62,34 +62,73 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
 
     // 1순위: currentInstructorId가 UUID면 바로 사용
     if (currentInstructorId && uuidRegex.test(currentInstructorId)) {
+      console.log("✅ myId 결정 (currentInstructorId):", currentInstructorId);
       setMyId(currentInstructorId);
       return;
     }
 
-    // 2순위: authUser.userId로 instructors 조회 (시트 무관하게 전체에서)
+    // 2순위: authUser.userId로 instructors.user_id 매칭
     var userId = authUser && authUser.userId;
     if (!userId) { setMyId(null); return; }
 
     (async function() {
       try {
-        // user_id 컬럼으로 조회
+        // 2-1: user_id 컬럼 직접 매칭
         var res = await sbGet("instructors?user_id=eq." + userId + "&select=id,name&is_active=eq.true&limit=1");
         if (res && res[0]) {
-          console.log("✅ myId 결정 (user_id):", res[0].id, res[0].name);
+          console.log("✅ myId 결정 (user_id 컬럼):", res[0].id, res[0].name);
           setMyId(res[0].id);
           return;
         }
-        // user_account로 name 매칭 시도
+
+        // 2-2: user 테이블에서 이름 조회 후 instructors.name 매칭 (region prefix 포함)
         var userInfo = await sbGet("user?select=name&user_id=eq." + userId);
-        if (userInfo && userInfo[0] && userInfo[0].name) {
-          var byName = await sbGet("instructors?name=eq." + encodeURIComponent(userInfo[0].name) + "&select=id,name&is_active=eq.true&limit=1");
-          if (byName && byName[0]) {
-            console.log("✅ myId 결정 (name):", byName[0].id, byName[0].name);
-            setMyId(byName[0].id);
+        var userName = userInfo && userInfo[0] && userInfo[0].name;
+        if (userName) {
+          // 정확한 이름 매칭
+          var byExact = await sbGet("instructors?name=eq." + encodeURIComponent(userName) + "&select=id,name&is_active=eq.true&limit=1");
+          if (byExact && byExact[0]) {
+            console.log("✅ myId 결정 (name 정확 매칭):", byExact[0].id, byExact[0].name);
+            setMyId(byExact[0].id);
             return;
           }
+
+          // region prefix 포함 이름 매칭: "지역 - 이름" 패턴
+          var allInsts = await sbGet("instructors?select=id,name&is_active=eq.true");
+          if (Array.isArray(allInsts)) {
+            var matched = allInsts.find(function(i) {
+              if (!i.name) return false;
+              var pureName = i.name.includes(" - ") ? i.name.split(" - ").slice(1).join(" - ") : i.name;
+              return pureName === userName || i.name === userName;
+            });
+            if (matched) {
+              console.log("✅ myId 결정 (region prefix 제거 매칭):", matched.id, matched.name);
+              setMyId(matched.id);
+              return;
+            }
+          }
         }
-        console.warn("⚠️ instructors에서 강사를 찾지 못함 (userId:", userId, ")");
+
+        // 2-3: authUser.instructorName으로 직접 매칭 (login API에서 이미 찾은 이름)
+        var instName = authUser && authUser.instructorName;
+        if (instName) {
+          var pureName = instName.includes(" - ") ? instName.split(" - ").slice(1).join(" - ") : instName;
+          var allInsts2 = await sbGet("instructors?select=id,name&is_active=eq.true");
+          if (Array.isArray(allInsts2)) {
+            var matched2 = allInsts2.find(function(i) {
+              if (!i.name) return false;
+              var ipur = i.name.includes(" - ") ? i.name.split(" - ").slice(1).join(" - ") : i.name;
+              return i.name === instName || ipur === pureName || i.name === pureName;
+            });
+            if (matched2) {
+              console.log("✅ myId 결정 (instructorName 매칭):", matched2.id, matched2.name);
+              setMyId(matched2.id);
+              return;
+            }
+          }
+        }
+
+        console.warn("⚠️ instructors에서 강사를 찾지 못함. userId:", userId, "/ userName:", userName, "/ instName:", instName);
         setMyId(null);
       } catch(e) {
         console.warn("myId 조회 실패:", e);
@@ -152,9 +191,9 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     async function loadSheetSchedule() {
       setLoadingSheet(true);
       try {
-        // 1. 현재 시트의 전체 강사 목록
+        // 1. 현재 시트의 전체 강사 목록 (user_id 포함해서 조회)
         var instRows = await sbGet(
-          "instructors?select=id,name,sort_order&sheet_id=eq." + activeSheetId +
+          "instructors?select=id,name,sort_order,user_id&sheet_id=eq." + activeSheetId +
           "&is_active=eq.true&order=sort_order.asc"
         );
         if (!Array.isArray(instRows) || instRows.length === 0) {
@@ -162,20 +201,26 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
         }
         setSheetInstructors(instRows);
 
-        // 2. myId로 내 실제 이름 조회 (시트에 관계없이)
-        var myInstRow = await sbGet("instructors?select=name&id=eq." + myId + "&is_active=eq.true");
-        var myRealName = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0].name : "";
+        // 2. myId로 내 실제 정보 조회 (시트에 관계없이)
+        var myInstRow = await sbGet("instructors?select=name,user_id&id=eq." + myId + "&is_active=eq.true");
+        var myInfo = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0] : null;
+        var myRealName = myInfo ? myInfo.name : "";
+        var myUserId = myInfo ? myInfo.user_id : null;
 
-        // 3. 현재 시트에서 내 이름과 일치하는 강사 찾기 (region prefix 무시)
+        // 3. 현재 시트에서 내 강사 찾기 (우선순위: UUID 직접 > user_id > 이름 매칭)
         var pureName = myRealName.includes(" - ") ? myRealName.split(" - ").slice(1).join(" - ") : myRealName;
         var myInstInSheet = instRows.find(function(i) {
+          // 3-1: UUID 직접 일치 (같은 시트에 동일 UUID)
           if (i.id === myId) return true;
+          // 3-2: user_id 일치 (다른 시트에 같은 유저로 등록된 경우)
+          if (myUserId && i.user_id && String(i.user_id) === String(myUserId)) return true;
+          // 3-3: 이름 매칭 (region prefix 제거 후)
           if (!i.name) return false;
           var instPure = i.name.includes(" - ") ? i.name.split(" - ").slice(1).join(" - ") : i.name;
           return i.name === myRealName || instPure === pureName || i.name === pureName;
         });
 
-        console.log("시트:", activeSheetId, "/ 내 이름:", myRealName, "/ 매칭:", myInstInSheet ? myInstInSheet.id : "없음");
+        console.log("시트:", activeSheetId, "/ 내 이름:", myRealName, "/ myUserId:", myUserId, "/ 매칭:", myInstInSheet ? myInstInSheet.id + " (" + myInstInSheet.name + ")" : "없음");
 
         if (!myInstInSheet) {
           setMyIdInSheet(null);

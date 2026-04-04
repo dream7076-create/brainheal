@@ -302,7 +302,8 @@ export default function AdminView({ dbEquipment, handoverLogs, onSheetTitleChang
         note: newNote.trim() || null,
         is_active: true,
         sort_order: instructors.length + 1,
-        sheet_id: activeSheetId  // ← 현재 시트 ID로 저장
+        sheet_id: activeSheetId,
+        user_id: selectedUser.user_id || null  // ← 로그인 매칭용 user_id 저장
       });
 
       if (res && res[0]) {
