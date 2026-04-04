@@ -17,6 +17,14 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
   const [myId, setMyId] = useState(null);
   const [handoverWeekOffset, setHandoverWeekOffset] = useState(0);
 
+  // ── 시트 멀티 선택 state ─────────────────────────────────────────
+  const [sheets, setSheets] = useState([]);           // 전체 시트 목록
+  const [activeSheetId, setActiveSheetId] = useState(null); // 현재 보는 시트
+  const [sheetSchedule, setSheetSchedule] = useState({}); // 현재 시트 스케줄
+  const [sheetInstructors, setSheetInstructors] = useState([]); // 현재 시트 강사 목록
+  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [mySheetIds, setMySheetIds] = useState([]); // 내가 속한 시트 ID 목록
+
   // 인계 폼 상태
   const [handoverReceivedQty, setHandoverReceivedQty] = useState("");
   const [handoverSendQty, setHandoverSendQty] = useState("");
@@ -92,7 +100,121 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     }
   }, [dbSchedule, currentInstructorId, authUser]);
 
-  // 인계 이력 로드
+  // ── 내가 속한 시트 목록 로드 ─────────────────────────────────────
+  useEffect(function() {
+    if (!myId) return;
+    async function loadMySheets() {
+      try {
+        // 1. 전체 시트 목록
+        var allSheets = await sbGet("sheets?select=id,title,sort_order&order=sort_order.asc");
+        if (!Array.isArray(allSheets)) return;
+
+        // 2. 내가 속한 시트 찾기 (instructors 테이블에서 user 기반으로 조회)
+        var myInsts = await sbGet("instructors?select=id,sheet_id&is_active=eq.true&name=eq." + encodeURIComponent(currentInstructorName || ""));
+        // user_account 기반으로도 조회
+        var userId = authUser && authUser.userId;
+        if (userId) {
+          var myInstsById = await sbGet("instructors?select=id,sheet_id&is_active=eq.true");
+          // 전체 조회 후 내 이름으로 필터 (name 필드 활용)
+          if (Array.isArray(myInstsById)) {
+            myInsts = myInstsById.filter(function(i) {
+              return i.id === myId || (myInsts && myInsts.some && myInsts.some(function(m) { return m.id === i.id; }));
+            });
+          }
+        }
+
+        // 3. 내 instructor id들의 sheet_id 수집
+        // myId가 속한 시트 + 같은 이름의 강사가 속한 시트
+        var myInstRows = await sbGet("instructors?select=id,sheet_id,name&is_active=eq.true");
+        var myName = currentInstructorName || "";
+        var relevantSheetIds = [];
+        if (Array.isArray(myInstRows)) {
+          myInstRows.forEach(function(inst) {
+            if (inst.id === myId || (myName && inst.name === myName)) {
+              if (inst.sheet_id && !relevantSheetIds.includes(inst.sheet_id)) {
+                relevantSheetIds.push(inst.sheet_id);
+              }
+            }
+          });
+        }
+
+        var mySheets = allSheets.filter(function(s) { return relevantSheetIds.includes(s.id); });
+        // 내가 속한 시트가 없으면 전체 시트 보여주기
+        if (mySheets.length === 0) mySheets = allSheets;
+
+        setSheets(mySheets);
+        setMySheetIds(relevantSheetIds);
+        setActiveSheetId(mySheets[0] ? mySheets[0].id : null);
+      } catch(e) {
+        console.warn("시트 목록 로드 실패:", e);
+      }
+    }
+    loadMySheets();
+  }, [myId, currentInstructorName]);
+
+  // ── 시트 변경 시 해당 시트의 스케줄 로드 ─────────────────────────
+  useEffect(function() {
+    if (!activeSheetId || !myId) return;
+    async function loadSheetSchedule() {
+      setLoadingSheet(true);
+      try {
+        // 현재 시트에서 내 강사 ID 찾기 (같은 이름의 강사)
+        var instRows = await sbGet(
+          "instructors?select=id,name,sort_order&sheet_id=eq." + activeSheetId +
+          "&is_active=eq.true&order=sort_order.asc"
+        );
+        if (!Array.isArray(instRows)) { setLoadingSheet(false); return; }
+
+        setSheetInstructors(instRows);
+
+        // 내 이름과 일치하는 강사 ID 찾기 (시트마다 다른 UUID)
+        var myName = currentInstructorName || "";
+        var myInstInSheet = instRows.find(function(i) {
+          return i.id === myId || i.name === myName;
+        });
+
+        if (!myInstInSheet) { setLoadingSheet(false); return; }
+
+        // 해당 시트의 rotation_schedule 로드
+        var schedRows = await sbGet(
+          "rotation_schedule?select=instructor_id,equipment_id,week" +
+          "&year=eq.2026&sheet_id=eq." + activeSheetId + "&order=week.asc"
+        );
+
+        // equipment id → name 맵
+        var eqData = await sbGet("equipment?select=id,name&is_active=eq.true");
+        var eqIdToName = {};
+        if (Array.isArray(eqData)) eqData.forEach(function(e) { eqIdToName[e.id] = e.name; });
+
+        // 스케줄 객체 구성
+        var schedObj = {};
+        instRows.forEach(function(inst) {
+          schedObj[inst.id] = {};
+          WEEKS.forEach(function(w) { schedObj[inst.id][w] = "-"; });
+        });
+        if (Array.isArray(schedRows)) {
+          schedRows.forEach(function(r) {
+            if (schedObj[r.instructor_id]) {
+              schedObj[r.instructor_id][r.week] = eqIdToName[r.equipment_id] || "-";
+            }
+          });
+        }
+
+        setSheetSchedule(schedObj);
+      } catch(e) {
+        console.warn("시트 스케줄 로드 실패:", e);
+      } finally {
+        setLoadingSheet(false);
+      }
+    }
+    loadSheetSchedule();
+  }, [activeSheetId, myId]);
+
+  // 현재 시트에서 내 강사 ID (시트마다 다를 수 있음)
+  var myInstInCurrentSheet = sheetInstructors.find(function(i) {
+    return i.id === myId || i.name === currentInstructorName;
+  });
+  var myIdInSheet = myInstInCurrentSheet ? myInstInCurrentSheet.id : myId;
   useEffect(function() {
     if (!dbSchedule || !myId) return;
     async function loadHandoverHistory() {
@@ -124,15 +246,16 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
     loadLostItems();
   }, [dbSchedule, myId]);
 
-  var instList = (dbInstructors && dbInstructors.length > 0) ? dbInstructors : INITIAL_INSTRUCTORS;
-  var me = instList.find(function(i) { return i.id === myId; });
-  var myDisplayName = currentInstructorName || (me ? me.name : "강사");
-  var myIdx = instList.findIndex(function(i) { return i.id === myId; });
+  var instList = sheetInstructors.length > 0 ? sheetInstructors : ((dbInstructors && dbInstructors.length > 0) ? dbInstructors : INITIAL_INSTRUCTORS);
+  var myDisplayName = currentInstructorName || "강사";
+  var myIdx = instList.findIndex(function(i) { return i.id === myIdInSheet; });
   var prevInst = myIdx > 0 ? instList[myIdx - 1] : null;
   var nextInst = myIdx < instList.length - 1 ? instList[myIdx + 1] : null;
   var isLastInst = myIdx === instList.length - 1 && instList.length > 0;
   var nextInstName = isLastInst ? "본사" : (nextInst ? nextInst.name : "-");
-  var myData = (dbSchedule && myId && dbSchedule[myId]) ? dbSchedule[myId] : {};
+  // 현재 시트 스케줄 우선, fallback으로 prop의 dbSchedule
+  var activeSchedule = Object.keys(sheetSchedule).length > 0 ? sheetSchedule : (dbSchedule || {});
+  var myData = (activeSchedule && myIdInSheet && activeSchedule[myIdInSheet]) ? activeSchedule[myIdInSheet] : {};
   var currentWkIdx = WEEKS.indexOf(CURRENT_WEEK);
 
   var mySchedule = WEEKS.map(function(w, idx) {
@@ -475,6 +598,41 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
         {/* 교구 일정 탭 */}
         {activeTab === "schedule" && (
           <div style={{ background: "#fff", borderRadius: "11px", border: "1px solid #E2E8F0", overflow: "hidden" }}>
+
+            {/* 시트 선택 탭 - 내가 속한 시트가 2개 이상일 때만 표시 */}
+            {sheets.length > 1 && (
+              <div style={{ display: "flex", gap: "0", borderBottom: "2px solid #E2E8F0", overflowX: "auto", background: "#F8FAFC" }}>
+                {sheets.map(function(sheet) {
+                  var isActive = sheet.id === activeSheetId;
+                  var isMine = mySheetIds.includes(sheet.id);
+                  return (
+                    <button key={sheet.id}
+                      onClick={function() { setActiveSheetId(sheet.id); }}
+                      style={{
+                        padding: "9px 16px", border: "none", background: isActive ? "#fff" : "transparent",
+                        borderBottom: isActive ? "2px solid #6366F1" : "2px solid transparent",
+                        marginBottom: "-2px", cursor: "pointer", whiteSpace: "nowrap",
+                        fontSize: "12px", fontWeight: isActive ? "800" : "500",
+                        color: isActive ? "#6366F1" : "#94A3B8",
+                        display: "flex", alignItems: "center", gap: "5px"
+                      }}>
+                      {sheet.title}
+                      {isMine && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22C55E", display: "inline-block" }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 로딩 상태 */}
+            {loadingSheet && (
+              <div style={{ padding: "24px", textAlign: "center", color: "#94A3B8", fontSize: "12px" }}>
+                ⏳ 스케줄 로드 중...
+              </div>
+            )}
+
+            {!loadingSheet && (
+            <div>
             <div style={{ padding: "11px 13px", borderBottom: "1px solid #F1F5F9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <button onClick={function() { if (scheduleMonth > 1) setScheduleMonth(scheduleMonth - 1); }} disabled={scheduleMonth <= 1}
@@ -531,6 +689,7 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
             <div style={{ padding: "7px 13px", background: "#F8FAFC", borderTop: "1px solid #F1F5F9" }}>
               <span style={{ fontSize: "9px", color: "#94A3B8" }}>일정은 관리자가 설정합니다. 수정 필요시 관리자에게 문의하세요.</span>
             </div>
+            </div> {/* !loadingSheet */}
           </div>
         )}
 
