@@ -55,9 +55,8 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
   const [lostItems, setLostItems] = useState([]);
   const [myHandoverLogs, setMyHandoverLogs] = useState([]);
 
-  // myId 결정
+  // myId 결정 - authUser 기반으로 instructors 테이블 직접 조회
   useEffect(function() {
-    if (!dbSchedule) return;
     var uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     // 1순위: currentInstructorId가 UUID면 바로 사용
@@ -66,40 +65,37 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
       return;
     }
 
-    // 2순위: dbSchedule 키 중에서 authUser.userId와 매칭되는 강사 찾기
+    // 2순위: authUser.userId로 instructors 조회 (시트 무관하게 전체에서)
     var userId = authUser && authUser.userId;
-    if (userId) {
-      (async function() {
-        try {
-          // user_id로 instructors 테이블 조회
-          var res = await sbGet("instructors?user_id=eq." + userId + "&select=id,name,region&is_active=eq.true");
-          if (res && res[0]) {
-            console.log("✅ 재조회 성공 (user_id):", res[0].id);
-            setMyId(res[0].id);
+    if (!userId) { setMyId(null); return; }
+
+    (async function() {
+      try {
+        // user_id 컬럼으로 조회
+        var res = await sbGet("instructors?user_id=eq." + userId + "&select=id,name&is_active=eq.true&limit=1");
+        if (res && res[0]) {
+          console.log("✅ myId 결정 (user_id):", res[0].id, res[0].name);
+          setMyId(res[0].id);
+          return;
+        }
+        // user_account로 name 매칭 시도
+        var userInfo = await sbGet("user?select=name&user_id=eq." + userId);
+        if (userInfo && userInfo[0] && userInfo[0].name) {
+          var byName = await sbGet("instructors?name=eq." + encodeURIComponent(userInfo[0].name) + "&select=id,name&is_active=eq.true&limit=1");
+          if (byName && byName[0]) {
+            console.log("✅ myId 결정 (name):", byName[0].id, byName[0].name);
+            setMyId(byName[0].id);
             return;
           }
-          // email로 재시도
-          var email = authUser.email || "";
-          if (email) {
-            var res2 = await sbGet("instructors?email=eq." + encodeURIComponent(email) + "&select=id,name,region&is_active=eq.true");
-            if (res2 && res2[0]) {
-              console.log("✅ 재조회 성공 (email):", res2[0].id);
-              setMyId(res2[0].id);
-              return;
-            }
-          }
-          // 그래도 없으면 null (강사 미등록 상태)
-          console.warn("⚠️ instructors 테이블에서 강사를 찾지 못함.");
-          setMyId(null);
-        } catch(e) {
-          console.warn("myId 조회 실패:", e);
-          setMyId(null);
         }
-      })();
-    } else {
-      setMyId(null);
-    }
-  }, [dbSchedule, currentInstructorId, authUser]);
+        console.warn("⚠️ instructors에서 강사를 찾지 못함 (userId:", userId, ")");
+        setMyId(null);
+      } catch(e) {
+        console.warn("myId 조회 실패:", e);
+        setMyId(null);
+      }
+    })();
+  }, [currentInstructorId, authUser]);
 
   // ── 내가 속한 시트 목록 로드 ─────────────────────────────────────
   useEffect(function() {
