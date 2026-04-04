@@ -5,6 +5,7 @@ import { saveHandoverLog, deleteHandoverAndRecovery, getEquipmentId, saveLostIte
 import { validateHandoverInput, validateRecoveryQty, validateRecoveryMethod, validateDiffQty } from "../lib/validation";
 import { resetHandoverForm, resetRecoveryModal, updateMyHandoverLogs, removeMyHandoverLog, removeLostItem, updateLostItemClosed } from "../lib/stateHelpers";
 
+
 function eqColor(name) {
   var idx = EQUIPMENT_LIST.indexOf(name);
   return idx >= 0 ? EQ_COLORS[idx % EQ_COLORS.length] : "#475569";
