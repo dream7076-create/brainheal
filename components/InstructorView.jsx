@@ -111,11 +111,14 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
         var myRealName = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0].name : (currentInstructorName || "");
 
         // 3. 전체 강사 목록에서 같은 이름인 모든 행의 sheet_id 수집
+        // myRealName에서 "지역 - " prefix 제거 (예: "부산남구 - 정상원" → "정상원")
+        var pureName = myRealName.includes(" - ") ? myRealName.split(" - ").slice(1).join(" - ") : myRealName;
         var allInsts = await sbGet("instructors?select=id,name,sheet_id&is_active=eq.true");
         var relevantSheetIds = [];
         if (Array.isArray(allInsts)) {
           allInsts.forEach(function(inst) {
-            if (inst.name === myRealName && inst.sheet_id && !relevantSheetIds.includes(inst.sheet_id)) {
+            var instPureName = inst.name && inst.name.includes(" - ") ? inst.name.split(" - ").slice(1).join(" - ") : inst.name;
+            if ((inst.name === myRealName || instPureName === pureName || inst.name === pureName) && inst.sheet_id && !relevantSheetIds.includes(inst.sheet_id)) {
               relevantSheetIds.push(inst.sheet_id);
             }
           });
@@ -127,7 +130,7 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
           }
         }
 
-        console.log("내 이름:", myRealName, "/ 속한 시트:", relevantSheetIds);
+        console.log("내 실제 이름:", myRealName, "/ pureName:", pureName, "/ 속한 시트IDs:", relevantSheetIds);
 
         var mySheets = allSheets.filter(function(s) { return relevantSheetIds.includes(s.id); });
         if (mySheets.length === 0) mySheets = allSheets.slice(0, 1); // 없으면 첫 시트만
@@ -162,9 +165,13 @@ export default function InstructorView({ authUser, handoverLogs, setHandoverLogs
         var myInstRow = await sbGet("instructors?select=name&id=eq." + myId + "&is_active=eq.true");
         var myRealName = (Array.isArray(myInstRow) && myInstRow[0]) ? myInstRow[0].name : "";
 
-        // 3. 현재 시트에서 내 이름과 일치하는 강사 찾기
+        // 3. 현재 시트에서 내 이름과 일치하는 강사 찾기 (region prefix 무시)
+        var pureName = myRealName.includes(" - ") ? myRealName.split(" - ").slice(1).join(" - ") : myRealName;
         var myInstInSheet = instRows.find(function(i) {
-          return i.id === myId || (myRealName && i.name === myRealName);
+          if (i.id === myId) return true;
+          if (!i.name) return false;
+          var instPure = i.name.includes(" - ") ? i.name.split(" - ").slice(1).join(" - ") : i.name;
+          return i.name === myRealName || instPure === pureName || i.name === pureName;
         });
 
         console.log("시트:", activeSheetId, "/ 내 이름:", myRealName, "/ 매칭:", myInstInSheet ? myInstInSheet.id : "없음");
